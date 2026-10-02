@@ -30,8 +30,13 @@ describe("parseImoAuroraXml", () => {
     const xml = `<aurora><night_data><evening_date>bad</evening_date></night_data><night_data><evening_date>2026-02-01</evening_date><activity_forecast>3</activity_forecast></night_data></aurora>`;
     const nights = parseImoAuroraXml(xml);
     expect(nights).toHaveLength(1);
-    expect(activityForNight({ source: "imo", fetchedAt: "", nights }, "2026-02-01")).toBe(3);
-    expect(activityForNight({ source: "imo", fetchedAt: "", nights }, "2026-02-02")).toBeNull();
+    expect(activityForNight({ source: "imo", fetchedAt: "", nights }, "2026-02-01")).toEqual({ activity: 3, fromDate: "2026-02-01" });
+  });
+
+  it("falls back to an adjacent night (e.g. after IMO rolls over at midnight) and says so", () => {
+    const forecast = { source: "imo" as const, fetchedAt: "", nights: [{ eveningDate: "2026-10-03", activity: 3 }] };
+    expect(activityForNight(forecast, "2026-10-02")).toEqual({ activity: 3, fromDate: "2026-10-03" });
+    expect(activityForNight(forecast, "2026-10-09")).toEqual({ activity: null, fromDate: null });
   });
 
   it("returns no nights for unrelated XML", () => {

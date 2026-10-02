@@ -32,7 +32,7 @@ export function ScoreDial({ score, size = 112, caption = "Viewing score" }: { sc
           />
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
-          <span className="tabular text-[2.6em] leading-none font-semibold tracking-tight" style={{ fontSize: size * 0.36 }}>
+          <span className="tabular leading-none font-semibold tracking-tight" style={{ fontSize: size * 0.36 }}>
             {score}
           </span>
         </div>

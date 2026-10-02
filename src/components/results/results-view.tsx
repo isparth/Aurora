@@ -34,6 +34,7 @@ export function ResultsView({ data, params }: { data: RecommendationResponse; pa
 
   const best = data.recommendations[0];
   const others = data.recommendations.slice(1);
+  const outsideCoverage = data.emptyReason === "outside-coverage";
   const hrefFor = (id: string) => locationHref(id, params);
   const selected = [...data.recommendations, ...data.notRecommended].find((r) => r.location.id === selectedId) ?? best;
 
@@ -83,16 +84,21 @@ export function ResultsView({ data, params }: { data: RecommendationResponse; pa
             </div>
           </div>
 
-          <div className="mt-8">
-            <TonightHeader data={data} />
-          </div>
-
-          <div className="mt-5">
-            <SegmentedControl label="How far are you willing to drive?" options={MODE_OPTIONS} value={pendingMode ?? data.travelMode} onChange={changeMode} />
-            <p className="sr-only" aria-live="polite">
-              {pending ? "Updating recommendations…" : ""}
-            </p>
-          </div>
+          {outsideCoverage ? (
+            <h1 className="mt-8 text-[1.75rem] leading-tight font-semibold tracking-tight">Outside Iceland</h1>
+          ) : (
+            <>
+              <div className="mt-8">
+                <TonightHeader data={data} />
+              </div>
+              <div className="mt-5">
+                <SegmentedControl label="How far are you willing to drive?" options={MODE_OPTIONS} value={pendingMode ?? data.travelMode} onChange={changeMode} />
+                <p className="sr-only" aria-live="polite">
+                  {pending ? "Updating recommendations…" : ""}
+                </p>
+              </div>
+            </>
+          )}
 
           {data.notices.length > 0 && (
             <div className="mt-5">
@@ -100,8 +106,8 @@ export function ResultsView({ data, params }: { data: RecommendationResponse; pa
             </div>
           )}
 
-          {showMap && !isDesktop && (
-            <div className="mt-5">
+          {showMap && (
+            <div className="mt-5 lg:hidden">
               <SegmentedControl
                 label="Show results as"
                 options={[
@@ -130,12 +136,12 @@ export function ResultsView({ data, params }: { data: RecommendationResponse; pa
             )}
           </div>
 
-          <DataSources status={data.dataStatus} />
+          {!outsideCoverage && <DataSources status={data.dataStatus} />}
           <SiteFooter className="mt-8" />
         </div>
       </div>
 
-      {isDesktop && map && <div className="relative h-dvh border-l border-line">{map}</div>}
+      {map && <div className="relative hidden h-dvh border-l border-line lg:block">{isDesktop && map}</div>}
 
       {best && (
         <div className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-line bg-night-950/90 px-4 pt-3 backdrop-blur-xl lg:hidden">

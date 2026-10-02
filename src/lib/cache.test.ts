@@ -35,4 +35,14 @@ describe("cached", () => {
   it("propagates the error when there is nothing stale to fall back to", async () => {
     await expect(cached("k", 1000, async () => Promise.reject(new Error("down")))).rejects.toThrow("down");
   });
+
+  it("backs off a failing upstream instead of retrying on every request", async () => {
+    vi.useFakeTimers();
+    const failing = vi.fn(async () => Promise.reject(new Error("down")));
+    await expect(cached("k", 60_000, failing)).rejects.toThrow("down");
+    await expect(cached("k", 60_000, failing)).rejects.toThrow("down");
+    expect(failing).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(31_000);
+    await expect(cached("k", 60_000, async () => "recovered")).resolves.toBe("recovered");
+  });
 });

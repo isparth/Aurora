@@ -197,8 +197,11 @@ export type ScoreLabel = "Excellent" | "Good" | "Fair" | "Poor";
 export type Recommendation = {
   rank: number;
   location: ViewingLocation;
+  /** Sky quality (no distance penalty) averaged over the best window you can still reach. */
   viewingScore: number;
   peakScore: number;
+  /** Best sky of the whole night at this spot, ignoring travel time — the undistorted environmental view. */
+  skyPeak: { time: string; score: number } | null;
   recommendationScore: number;
   label: ScoreLabel;
   bestWindow: { start: string; end: string; peak: string } | null;

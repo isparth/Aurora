@@ -50,6 +50,25 @@ export function parseRecommendationQuery(params: RawParams): { ok: true; value: 
   return { ok: true, value: { lat, lon, label: label || undefined, travelMode, demo: isDemo } };
 }
 
+export const isDemoParam = (params: RawParams) => {
+  const demo = first(params.demo);
+  return demo === "true" || demo === "1";
+};
+
+/**
+ * Detail-page variant: the origin is optional (no travel is applied without one), but whatever
+ * *is* supplied must still be valid.
+ */
+export function parseDetailQuery(
+  params: RawParams,
+): { ok: true; value: Partial<Pick<RecommendationQuery, "lat" | "lon" | "label">> & Pick<RecommendationQuery, "travelMode" | "demo"> } | { ok: false; message: string } {
+  const hasOrigin = Boolean(first(params.lat) || first(params.lon));
+  const parsed = parseRecommendationQuery(hasOrigin ? params : { ...params, demo: "true", lat: undefined, lon: undefined });
+  if (!parsed.ok) return parsed;
+  const demo = isDemoParam(params);
+  return hasOrigin ? { ok: true, value: { ...parsed.value, demo } } : { ok: true, value: { travelMode: parsed.value.travelMode, demo } };
+}
+
 export function errorResponse(code: string, message: string, status: number): Response {
   return Response.json({ error: { code, message } }, { status });
 }

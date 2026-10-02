@@ -245,6 +245,32 @@ describe("recommend — provider failures degrade gracefully", () => {
     expect(res.emptyReason).toBe("no-forecast");
   });
 
+  it("never presents stale cached aurora data as live", async () => {
+    const res = await run(
+      context({
+        weather: { [A.id]: steadyPartlyClear, [B.id]: steadyPartlyClear },
+        drive: { [A.id]: 30, [B.id]: 30 },
+        overrides: {
+          aurora: {
+            getForecast: async () => ({ source: "imo", fetchedAt: new Date(NOW - 3 * HOUR).toISOString(), nights: [{ eveningDate: "2026-10-02", activity: 4 }] }),
+          },
+        },
+      }),
+    );
+    expect(res.dataStatus.aurora.state).toBe("degraded");
+    expect(res.notices.join(" ")).toMatch(/couldn't be refreshed/);
+  });
+
+  it("explains an empty result as 'no reachable window' when the real drive only arrives after dawn", async () => {
+    const preDawn = Date.UTC(2026, 9, 3, 5, 0);
+    const res = await recommend(
+      { origin: REYKJAVIK, travelMode: "chase", now: preDawn },
+      context({ weather: { [A.id]: clearAllNight, [B.id]: clearAllNight }, drive: { [A.id]: 125, [B.id]: 125 } }),
+    );
+    expect(res.recommendations).toEqual([]);
+    expect(res.emptyReason).toBe("no-window");
+  });
+
   it("flags origins outside Iceland", async () => {
     const res = await recommend({ origin: { lat: 51.5, lon: -0.12, label: "London" }, travelMode: "standard", now: NOW }, context({ weather: {}, drive: {} }));
     expect(res.emptyReason).toBe("outside-coverage");

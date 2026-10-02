@@ -37,9 +37,10 @@ export function interpolateWeather(hourly: HourlyWeather[], t: number): HourlyWe
   if (t < first.time) return first.time - t <= 30 * MINUTE ? first : null;
   if (t >= last.time) return t - last.time <= 30 * MINUTE ? last : null;
   let i = 0;
-  while (hourly[i + 1].time <= t) i++;
+  while (i < hourly.length - 2 && hourly[i + 1].time <= t) i++;
   const a = hourly[i];
   const b = hourly[i + 1];
+  if (b.time <= a.time) return null;
   const f = (t - a.time) / (b.time - a.time);
   return {
     time: t,

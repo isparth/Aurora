@@ -29,11 +29,11 @@ import { moonEvents, moonPhaseName, sunAltitude } from "@/lib/astronomy/darkness
 import { cached } from "@/lib/cache";
 import { mapWithConcurrency } from "@/lib/concurrency";
 import { haversineKm, thinLine } from "@/lib/geo";
-import { describeError } from "@/lib/http";
+import { describeError, logProviderError } from "@/lib/http";
 import { scoreLabel, tonightHeadline } from "@/lib/scoring/labels";
 import { computeRecommendationScore } from "@/lib/scoring/recommendation-score";
 import { SLOT_MS } from "@/lib/scoring/windows";
-import { HOUR, isWinterSeason, MINUTE } from "@/lib/time";
+import { formatTime, HOUR, isWinterSeason, MINUTE } from "@/lib/time";
 
 import { computeConfidence } from "./confidence";
 import { computeNight, type Night } from "./night";
@@ -106,25 +106,51 @@ function initialStatus(ctx: EngineContext): DataStatus {
   };
 }
 
+/** Data older than this was served from cache because a refresh failed — say so instead of calling it live. */
+const STALE_AFTER = { aurora: 30 * MINUTE, roads: 15 * MINUTE };
+const isStale = (fetchedAt: string | undefined, now: number, limit: number) =>
+  fetchedAt !== undefined && now - Date.parse(fetchedAt) > limit;
+
 function resolveAurora(
   result: Settled<Awaited<ReturnType<AuroraProvider["getForecast"]>>>,
   eveningDate: string,
   ctx: EngineContext,
   status: DataStatus,
   notices: string[],
+  now: number,
 ): RecommendationResponse["aurora"] {
   if (!result.ok) {
+    logProviderError("aurora", result.error);
     status.aurora = { state: "unavailable", message: describeError(result.error) };
     notices.push("Aurora activity temporarily unavailable — rankings use sky conditions only.");
     return { activity: null, available: false, eveningDate };
   }
-  const activity = activityForNight(result.value, eveningDate);
-  status.aurora = { state: ctx.demo ? "demo" : activity === null ? "degraded" : "ok", fetchedAt: result.value.fetchedAt };
+  const { activity, fromDate } = activityForNight(result.value, eveningDate);
+  const approximate = fromDate !== null && fromDate !== eveningDate;
+  const stale = !ctx.demo && isStale(result.value.fetchedAt, now, STALE_AFTER.aurora);
+  status.aurora = {
+    state: ctx.demo ? "demo" : activity === null || approximate || stale ? "degraded" : "ok",
+    fetchedAt: result.value.fetchedAt,
+  };
   if (activity === null) {
     status.aurora.message = "No IMO activity forecast for tonight.";
     notices.push("IMO has not published an aurora activity forecast for tonight — rankings use sky conditions only.");
+  } else if (approximate) {
+    status.aurora.message = `Using IMO's forecast for the night of ${fromDate}.`;
+  }
+  if (stale) {
+    status.aurora.message = "Latest update failed; showing the last forecast received.";
+    notices.push(`The aurora forecast couldn't be refreshed — showing IMO data from ${formatTime(result.value.fetchedAt)}.`);
   }
   return { activity, available: activity !== null, eveningDate };
+}
+
+function resolveRoadsFreshness(fetchedAt: string | undefined, ctx: EngineContext, status: DataStatus, notices: string[], now: number) {
+  status.roads = { ...status.roads, fetchedAt };
+  if (!ctx.demo && isStale(fetchedAt, now, STALE_AFTER.roads)) {
+    status.roads = { state: "degraded", fetchedAt, message: "Latest update failed; showing the last report received." };
+    notices.push(`Road conditions couldn't be refreshed — last official report ${formatTime(fetchedAt!)}. Check umferdin.is before you travel.`);
+  }
 }
 
 async function fetchWeather(provider: WeatherProvider, points: Coordinates[]): Promise<(HourlyWeather[] | Error)[]> {
@@ -156,15 +182,17 @@ async function analyseCamera(
 ): Promise<CameraObservation | undefined> {
   const cam = nearby.camera;
   if (sunAltitude(now, { lat: cam.latitude, lon: cam.longitude }) > -6) return undefined;
-  if (nearby.imageUpdatedAt && now - Date.parse(nearby.imageUpdatedAt) > 45 * MINUTE) return undefined;
+  // An image of unknown or old age says nothing reliable about the sky right now.
+  if (!nearby.imageUpdatedAt || now - Date.parse(nearby.imageUpdatedAt) > 45 * MINUTE) return undefined;
   const image = await cameras.getCameraImage(cam.id);
   if (!image) return undefined;
   const version = image.lastModified ?? String(Math.floor(now / (10 * MINUTE)));
   return cached(`vision:${vision.model}:${cam.id}:${version}`, 30 * MINUTE, () => vision.analyze(image, cam, now));
 }
 
+/** Forecast cloud for the slot containing `now` — what a camera image taken now should agree with. */
 function forecastCloudNow(evaluations: SlotEvaluation[], now: number): number | null {
-  const current = evaluations.find((e) => now >= e.time - SLOT_MS && now < e.time + SLOT_MS);
+  const current = evaluations.find((e) => now >= e.time && now < e.time + SLOT_MS);
   return current ? current.conditions.clouds.effective : null;
 }
 
@@ -238,6 +266,7 @@ export function buildRecommendation(args: {
     location,
     viewingScore: plan.viewingScore,
     peakScore: plan.peakScore,
+    skyPeak: plan.nightPeak ? { time: iso(plan.nightPeak.time), score: plan.nightPeak.score } : null,
     recommendationScore: score,
     label: scoreLabel(plan.viewingScore),
     bestWindow:
@@ -336,7 +365,7 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
     auroraPromise,
     candidates.length > 0 ? fetchWeather(providers.weather, candidates.map((c) => c.point)) : Promise.resolve([]),
   ]);
-  const aurora = resolveAurora(auroraResult, night.eveningDate, ctx, status, notices);
+  const aurora = resolveAurora(auroraResult, night.eveningDate, ctx, status, notices, now);
   const nightDto = toNightDto(night);
   if (candidates.length === 0) return respond({ night: nightDto, aurora, emptyReason: "no-candidates" });
 
@@ -346,6 +375,7 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
     return [{ ...c, hourly, evaluations: evaluateSlots({ location: c.location, hourly, slots: night.slots, auroraActivity: aurora.activity, now }) }];
   });
   const failedWeather = candidates.length - scored.length;
+  if (failedWeather > 0) logProviderError("weather", weather.find((w) => w instanceof Error));
   if (scored.length === 0) {
     status.weather = { state: "unavailable", message: "Weather forecasts could not be loaded." };
     notices.push("Weather forecasts are temporarily unavailable, so locations cannot be ranked right now.");
@@ -382,6 +412,8 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
   );
   const travels: Route[] = routeResults.map((r, i) => (r.status === "fulfilled" ? r.value : provisional[i].s.estimate));
   const routeFailures = routeResults.filter((r) => r.status === "rejected").length;
+  const firstRouteFailure = routeResults.find((r) => r.status === "rejected");
+  if (firstRouteFailure?.status === "rejected") logProviderError("routing", firstRouteFailure.reason);
   if (providers.routing.name === "estimate") {
     status.routing = { state: ctx.demo ? "demo" : "degraded", message: "Drive times are estimated from distance." };
   } else if (routeFailures === routeResults.length) {
@@ -402,11 +434,11 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
   const roads = roadResults.map((r) => (r.status === "fulfilled" ? r.value : UNKNOWN_ROAD));
   if (roadResults.every((r) => r.status === "rejected")) {
     const first = roadResults[0];
+    if (first?.status === "rejected") logProviderError("roads", first.reason);
     status.roads = { state: "unavailable", message: first?.status === "rejected" ? describeError(first.reason) : undefined };
     notices.push("Road conditions unavailable — check official road information (umferdin.is) before you travel.");
   } else {
-    const fetchedAt = roads.find((r) => r.fetchedAt)?.fetchedAt;
-    status.roads = { ...status.roads, fetchedAt };
+    resolveRoadsFreshness(roads.find((r) => r.fetchedAt)?.fetchedAt, ctx, status, notices, now);
   }
 
   const cameraProvider = providers.cameras;
@@ -414,7 +446,11 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
   if (cameraProvider) {
     const cameraResults = await mapWithConcurrency(provisional, 4, (p) => findCamera(cameraProvider, p.s.point));
     cameras = cameraResults.map((r) => (r.status === "fulfilled" ? r.value : undefined));
-    if (cameraResults.every((r) => r.status === "rejected")) status.cameras = { state: "unavailable", message: "Road cameras unavailable." };
+    if (cameraResults.every((r) => r.status === "rejected")) {
+      const first = cameraResults[0];
+      if (first?.status === "rejected") logProviderError("cameras", first.reason);
+      status.cameras = { state: "unavailable", message: "Road cameras unavailable." };
+    }
 
     const vision = providers.vision;
     if (vision) {
@@ -425,16 +461,20 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
         if (r.status === "fulfilled" && r.value) cameras[i] = { ...cameras[i]!, observation: r.value };
       });
       if (targets.length > 0 && visionResults.every((r) => r.status === "rejected")) {
+        const first = visionResults[0];
+        if (first?.status === "rejected") logProviderError("vision", first.reason);
         status.vision = { state: "unavailable", message: "Camera analysis failed; camera evidence omitted." };
       }
     }
   }
 
   // Phase 6 — final ranking with real travel times, road safety and camera evidence.
+  let withinTravelLimit = 0;
   const final = provisional.flatMap((p, i) => {
     const travel = travels[i];
     const limit = travel.estimated ? maxMinutes * ESTIMATE_TOLERANCE : maxMinutes + 5;
     if (travel.durationMinutes > limit) return [];
+    withinTravelLimit++;
     const camera = cameras[i];
     const evaluations = camera?.observation
       ? evaluateSlots({ location: p.s.location, hourly: p.s.hourly, slots: night.slots, auroraActivity: aurora.activity, now, camera: camera.observation })
@@ -455,7 +495,7 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
     summary: { headline: tonightHeadline(top ? top.viewingScore : null), level: top ? scoreLabel(top.viewingScore) : null },
     recommendations,
     notRecommended,
-    emptyReason: final.length === 0 ? "no-candidates" : undefined,
+    emptyReason: final.length > 0 ? undefined : withinTravelLimit === 0 ? "no-candidates" : "no-window",
   });
 }
 
@@ -517,9 +557,10 @@ export async function evaluateLocation(
       : Promise.resolve<Settled<NearbyCamera[]>>({ ok: true, value: [] }),
   ]);
 
-  const aurora = resolveAurora(auroraResult, night.eveningDate, ctx, status, notices);
+  const aurora = resolveAurora(auroraResult, night.eveningDate, ctx, status, notices, now);
   const travel = routeResult.ok ? routeResult.value : estimateRoute(origin as Origin, point);
   if (!routeResult.ok) {
+    logProviderError("routing", routeResult.error);
     status.routing = { state: "unavailable", message: describeError(routeResult.error) };
     notices.push("Routing is unavailable — the drive time is estimated from distance.");
   } else if (travel.estimated && origin) {
@@ -531,15 +572,17 @@ export async function evaluateLocation(
   );
   const road = roadResult.ok ? roadResult.value : UNKNOWN_ROAD;
   if (!roadResult.ok) {
+    logProviderError("roads", roadResult.error);
     status.roads = { state: "unavailable", message: describeError(roadResult.error) };
     notices.push("Road conditions unavailable — check official road information (umferdin.is) before you travel.");
   } else {
-    status.roads = { ...status.roads, fetchedAt: road.fetchedAt };
+    resolveRoadsFreshness(road.fetchedAt, ctx, status, notices, now);
   }
 
   let nearbyCameras: NearbyCamera[] = [];
   let camera: NearbyCamera | undefined;
   if (!nearbyResult.ok) {
+    logProviderError("cameras", nearbyResult.error);
     status.cameras = { state: "unavailable", message: "Road cameras unavailable." };
   } else if (providers.cameras) {
     nearbyCameras = nearbyResult.value.slice(0, 4);
@@ -550,13 +593,17 @@ export async function evaluateLocation(
       if (providers.vision) {
         const obs = await settle(analyseCamera(providers.cameras, providers.vision, camera, now));
         if (obs.ok && obs.value) camera = { ...camera, observation: obs.value };
-        if (!obs.ok) status.vision = { state: "unavailable", message: "Camera analysis failed; camera evidence omitted." };
+        if (!obs.ok) {
+          logProviderError("vision", obs.error);
+          status.vision = { state: "unavailable", message: "Camera analysis failed; camera evidence omitted." };
+        }
       }
       nearbyCameras = nearbyCameras.map((c) => (c.camera.id === camera!.camera.id ? camera! : c));
     }
   }
 
   if (!weatherResult.ok) {
+    logProviderError("weather", weatherResult.error);
     status.weather = { state: "unavailable", message: describeError(weatherResult.error) };
     notices.push("The weather forecast for this location is temporarily unavailable.");
     return { ...base, night: toNightDto(night), aurora, nearbyCameras };

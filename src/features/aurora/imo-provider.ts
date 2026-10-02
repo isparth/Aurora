@@ -69,7 +69,19 @@ export const imoAuroraProvider: AuroraProvider = {
     ),
 };
 
-/** Activity for the night that starts on `eveningDate`, or null if IMO has no value for it. */
-export function activityForNight(forecast: AuroraForecast, eveningDate: string): number | null {
-  return forecast.nights.find((n) => n.eveningDate === eveningDate)?.activity ?? null;
+const shiftDate = (date: string, days: number) => new Date(Date.parse(`${date}T12:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+
+/**
+ * Activity for the night that starts on `eveningDate`. After midnight IMO's feed may already
+ * have rolled over to the next evening, so an adjacent night is used as a labelled fallback.
+ */
+export function activityForNight(
+  forecast: AuroraForecast,
+  eveningDate: string,
+): { activity: number | null; fromDate: string | null } {
+  for (const date of [eveningDate, shiftDate(eveningDate, 1), shiftDate(eveningDate, -1)]) {
+    const activity = forecast.nights.find((n) => n.eveningDate === date)?.activity;
+    if (activity !== undefined && activity !== null) return { activity, fromDate: date };
+  }
+  return { activity: null, fromDate: null };
 }

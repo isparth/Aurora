@@ -79,6 +79,12 @@ aurora never lowers the score (road cameras are often badly exposed, pointed at 
 
 Labels: **80+ Excellent · 65+ Good · 45+ Fair · <45 Poor**.
 
+A destination's headline viewing score is the sky score averaged over **the best window you can still reach**. It never
+includes a distance penalty, but it does describe the hours you can actually be there, so it always matches the
+"Best viewing" window shown next to it. The undistorted view is kept too: every slot's sky score appears in the
+destination timeline (unreachable hours are hatched), and each recommendation carries `skyPeak` — the best sky of the
+whole night, ignoring travel. When the night peaks before you could arrive, the app says so.
+
 ### 2. Best window, arrival and departure
 
 - Arrival = now + drive time + 5 minutes to park. A slot counts only if you can be there by its midpoint.
@@ -137,6 +143,12 @@ Open-Meteo without touching the scoring.
 aurora 15 min · weather 15 min per coordinate · road conditions 5 min · road geometry 24 h (IRCA asks that it is not
 fetched many times a day) · camera list 12 h · camera images 5 min · routes 12 h per ~1 km origin cell · place search 24 h.
 
+**Upstream protection:** a failing upstream is backed off for 30 s (serving stale data where possible) instead of
+making every request wait for its timeout; data served from cache after a failed refresh is labelled as such, never as
+"live". Process-wide request budgets cap routing (OSRM public server ≈ 50/min, Mapbox 120/min by default, configurable
+with `ROUTING_MAX_PER_MINUTE`) and place search (Photon 120/min); beyond them the app falls back to estimates and local
+search. Camera images are only fetched from IRCA over HTTPS by feed id, and only raster images are proxied.
+
 **Failure handling:** every provider call is isolated. If IMO is down the app ranks on sky conditions and lowers
 confidence; failed weather for one spot drops only that spot; routing falls back to an estimate (marked "estimated");
 road data falls back to "unavailable — check umferdin.is"; camera failures simply omit camera evidence. A per-source
@@ -179,6 +191,7 @@ All optional — see [`.env.example`](.env.example).
 | --- | --- |
 | `ROUTING_PROVIDER` | `mapbox`, `osrm` or `estimate` (default: Mapbox if a token is set, else OSRM) |
 | `MAPBOX_TOKEN` | Mapbox Directions token (server-side only) |
+| `ROUTING_MAX_PER_MINUTE` | Request budget for Mapbox routing (default 120/min) |
 | `OSRM_BASE_URL` | Self-hosted OSRM (default: public demo server) |
 | `VISION_API_KEY` | Enables supplementary camera analysis via any OpenAI-compatible endpoint |
 | `VISION_API_BASE_URL`, `VISION_MODEL` | Endpoint and model for camera analysis (default OpenAI, `gpt-4o-mini`) |
@@ -215,7 +228,8 @@ Unit tests cover the behaviour the product depends on:
   helps). Use Mapbox or a self-hosted OSRM in production.
 - **Cameras:** viewing direction is parsed from IRCA's Icelandic descriptions and only a handful of cameras are manually
   reviewed. Night images are often too dark to judge; analysis only runs at night on images younger than 45 minutes.
-- **Caching** is in-process memory: it is not shared across server instances and resets on restart / cold start.
+- **Caching and request budgets** are in-process memory: they are not shared across server instances and reset on
+  restart / cold start. There is no per-client rate limiting; put the app behind a proxy or CDN limit for public deployment.
 - **Coverage** is Iceland only, using 42 curated, publicly accessible locations — the app never recommends arbitrary
   coordinates.
 

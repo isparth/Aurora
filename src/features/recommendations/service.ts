@@ -1,4 +1,4 @@
-import { nearestTown } from "@/data/towns";
+import { nearestTown, REYKJAVIK } from "@/data/towns";
 import { VIEWING_LOCATIONS } from "@/data/viewing-locations";
 import type { LocationDetail, Origin, RecommendationResponse, TravelMode } from "@/domain/types";
 import { imoAuroraProvider } from "@/features/aurora/imo-provider";
@@ -54,6 +54,8 @@ export async function getLocationDetail(params: {
   travelMode: TravelMode;
   demo?: boolean;
 }): Promise<LocationDetail | null> {
+  // Demo origin defaults to Reykjavík, matching the demo results page.
+  if (params.demo && (params.lat == null || params.lon == null)) params = { ...params, lat: REYKJAVIK.lat, lon: REYKJAVIK.lon, label: "Reykjavík" };
   const { ctx, now } = contextFor(params.demo);
   const origin = params.lat != null && params.lon != null ? resolveOrigin(params.lat, params.lon, params.label) : null;
   return evaluateLocation({ locationId: params.id, origin, travelMode: params.travelMode, now }, ctx);

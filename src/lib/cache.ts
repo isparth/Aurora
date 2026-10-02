@@ -4,9 +4,14 @@ type Entry = {
   expiresAt: number;
   staleUntil: number;
   pending?: Promise<unknown>;
+  /** After a failed refresh, fail fast (or serve stale) until this time instead of re-hitting a broken upstream. */
+  retryAt?: number;
+  error?: unknown;
 };
 
 const MAX_ENTRIES = 2000;
+/** How long a failed upstream is left alone before it is tried again. */
+export const FAILURE_BACKOFF_MS = 30_000;
 
 /** Survives Next.js dev hot reloads; one cache per server process. */
 const globalStore = globalThis as typeof globalThis & { __auroraCache?: Map<string, Entry> };
@@ -37,7 +42,8 @@ export function writeCache<T>(key: string, value: T, ttlMs: number, staleMs = tt
 
 /**
  * Read-through cache with in-flight de-duplication. If a refresh fails, a recently expired
- * value is served instead (stale-on-error) so one flaky upstream does not take the app down.
+ * value is served instead (stale-on-error), and the upstream is left alone for a short backoff
+ * so a broken service doesn't make every request wait for its timeout.
  */
 export async function cached<T>(
   key: string,
@@ -50,6 +56,11 @@ export async function cached<T>(
 
   const existing = store.get(key);
   if (existing?.pending) return existing.pending as Promise<T>;
+  if (existing?.retryAt && Date.now() < existing.retryAt) {
+    const stale = readCache<T>(key, { allowStale: true });
+    if (stale !== undefined) return stale;
+    throw existing.error;
+  }
 
   const pending = loader()
     .then((value) => {
@@ -57,9 +68,13 @@ export async function cached<T>(
       return value;
     })
     .catch((error: unknown) => {
-      const stale = readCache<T>(key, { allowStale: true });
       const entry = store.get(key);
-      if (entry) entry.pending = undefined;
+      if (entry) {
+        entry.pending = undefined;
+        entry.retryAt = Date.now() + Math.min(FAILURE_BACKOFF_MS, ttlMs);
+        entry.error = error;
+      }
+      const stale = readCache<T>(key, { allowStale: true });
       if (stale !== undefined) return stale;
       throw error;
     });

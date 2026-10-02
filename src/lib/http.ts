@@ -42,10 +42,19 @@ export async function fetchText(url: string, init?: RequestInit & { timeoutMs?: 
   return (await fetchWithTimeout(url, init)).text();
 }
 
+/** Short, safe description for status panels and API errors — never echoes upstream content. */
 export function describeError(error: unknown): string {
+  if (error instanceof HttpError) return `upstream returned HTTP ${error.status}`;
   if (error instanceof Error) {
     if (error.name === "TimeoutError" || error.name === "AbortError") return "request timed out";
-    return error.message;
+    if (error.name === "ZodError" || error instanceof SyntaxError) return "unexpected response format";
+    if (error.name === "BudgetExceededError") return "temporarily rate-limited";
+    if (error.name === "TypeError") return "network error";
   }
-  return String(error);
+  return "temporarily unavailable";
+}
+
+/** Server-side log line for a failed provider (message only; URLs are already stripped of query strings). */
+export function logProviderError(source: string, error: unknown): void {
+  console.warn(`[aurora] ${source} unavailable: ${error instanceof Error ? error.message : String(error)}`);
 }

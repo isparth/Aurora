@@ -3,8 +3,33 @@ import { describe, expect, it } from "vitest";
 import type { Coordinates, RoadStatus } from "@/domain/types";
 import { bboxOf, polylineLengthKm } from "@/lib/geo";
 
+import { buildNetwork, parseGeometry } from "./irca-provider";
 import { assessRoad, type RoadNetwork, type RoadSegment } from "./route-matching";
 import { normaliseRoadCondition } from "./status";
+
+describe("IRCA geometry + conditions join", () => {
+  it("accepts LineString and MultiLineString features and skips malformed ones instead of failing", () => {
+    const geometry = parseGeometry({
+      features: [
+        { properties: { IDBUTUR: 1 }, geometry: { type: "LineString", coordinates: [[-21, 64], [-21.1, 64.1]] } },
+        { properties: { IDBUTUR: 2 }, geometry: { type: "MultiLineString", coordinates: [[[-20, 64], [-20.1, 64]], [[-20.2, 64], [-20.3, 64]]] } },
+        { properties: { IDBUTUR: 3 }, geometry: null },
+        { properties: {}, geometry: { type: "Point", coordinates: [0, 0] } },
+      ],
+    });
+    expect(geometry.get("1")).toHaveLength(1);
+    expect(geometry.get("2")).toHaveLength(2);
+    const network = buildNetwork(
+      [
+        { IdButur: 1, FulltNafnButs: "Þingvallavegur", AstandYfirbord: "HALKUBLETTIR", AstandLysingEn: "Spots of ice" },
+        { IdButur: 99, FulltNafnButs: "No geometry", AstandYfirbord: "LOKAD" },
+      ],
+      geometry,
+      "2026-10-02T20:00:00Z",
+    );
+    expect(network.segments.map((s) => [s.id, s.status])).toEqual([["1", "caution"]]);
+  });
+});
 
 const line = (from: Coordinates, to: Coordinates, steps = 20): Coordinates[] =>
   Array.from({ length: steps + 1 }, (_, i) => ({ lat: from.lat + ((to.lat - from.lat) * i) / steps, lon: from.lon + ((to.lon - from.lon) * i) / steps }));

@@ -57,8 +57,20 @@ export function cameraMetadata(camera: Camera): AuroraCameraMetadata {
   return { cameraId: camera.id, usefulForAurora: true, skyVisibilityScore: score, directionDegrees: d };
 }
 
+/** Only fetch images from IRCA itself, over HTTPS — never from whatever URL a feed happens to contain. */
+export function isTrustedImageUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && (u.hostname === "vegagerdin.is" || u.hostname.endsWith(".vegagerdin.is"));
+  } catch {
+    return false;
+  }
+}
+
+const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
 export function normaliseCameras(raw: unknown): Camera[] {
-  return cameraSchema.parse(raw).map((c, index) => {
+  return cameraSchema.parse(raw).filter((c) => isTrustedImageUrl(c.Slod)).map((c, index) => {
     const description = (c.Skyring ?? c.Myndavel).trim();
     const fileId = c.Slod.match(/\/([^/]+)\.jpe?g$/i)?.[1];
     return {
@@ -108,9 +120,9 @@ export const ircaCameraProvider: CameraProvider = {
     const camera = await findCamera(cameraId);
     if (!camera) return null;
     return cached(`irca:camera-image:${camera.id}`, 5 * MINUTE, async () => {
-      const response = await fetchWithTimeout(camera.imageUrl, { timeoutMs: 8000 });
-      const contentType = response.headers.get("content-type") ?? "";
-      if (!contentType.startsWith("image/")) throw new Error("Camera did not return an image");
+      const response = await fetchWithTimeout(camera.imageUrl, { timeoutMs: 8000, redirect: "error" });
+      const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+      if (!IMAGE_TYPES.has(contentType)) throw new Error("Camera did not return a raster image");
       const bytes = new Uint8Array(await response.arrayBuffer());
       if (bytes.byteLength > MAX_IMAGE_BYTES) throw new Error("Camera image too large");
       const lastModified = response.headers.get("last-modified");
@@ -122,7 +134,7 @@ export const ircaCameraProvider: CameraProvider = {
     const camera = await findCamera(cameraId);
     if (!camera) return undefined;
     return cached(`irca:camera-time:${camera.id}`, 5 * MINUTE, async () => {
-      const response = await fetchWithTimeout(camera.imageUrl, { method: "HEAD", timeoutMs: 5000 });
+      const response = await fetchWithTimeout(camera.imageUrl, { method: "HEAD", timeoutMs: 5000, redirect: "error" });
       const lastModified = response.headers.get("last-modified");
       return lastModified ? new Date(lastModified).toISOString() : undefined;
     });

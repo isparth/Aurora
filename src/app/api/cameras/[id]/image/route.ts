@@ -14,6 +14,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     return new Response(image.bytes as BodyInit, {
       headers: {
         "Content-Type": image.contentType,
+        "Content-Disposition": "inline",
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+        "X-Content-Type-Options": "nosniff",
         "Cache-Control": "public, max-age=60, s-maxage=300",
         ...(image.lastModified ? { "Last-Modified": new Date(image.lastModified).toUTCString() } : {}),
         "X-Attribution": "Icelandic Road and Coastal Administration, CC BY 4.0",

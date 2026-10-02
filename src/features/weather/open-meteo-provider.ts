@@ -62,7 +62,7 @@ export function normaliseOpenMeteoLocation(raw: unknown): HourlyWeather[] {
       gustKph: num(h.wind_gusts_10m?.[i]),
     });
   });
-  return out;
+  return out.sort((a, b) => a.time - b.time);
 }
 
 /** Open-Meteo returns an object for one coordinate and an array for several. */

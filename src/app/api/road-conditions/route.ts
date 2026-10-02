@@ -1,25 +1,35 @@
 import type { NextRequest } from "next/server";
+import { z } from "zod";
 
-import type { RoadStatus } from "@/domain/types";
 import { errorResponse } from "@/features/recommendations/query";
 import { loadRoadNetwork } from "@/features/roads/irca-provider";
 import { describeError } from "@/lib/http";
 
+const querySchema = z.object({
+  status: z
+    .string()
+    .optional()
+    .transform((s) => (s ? s.split(",").map((x) => x.trim()).filter(Boolean) : []))
+    .pipe(z.array(z.enum(["good", "caution", "difficult", "closed", "unknown"]))),
+  geometry: z.enum(["true", "false"]).optional(),
+});
+
 /** Normalised IRCA road conditions. Add ?status=caution,closed to filter, ?geometry=true for lines. */
 export async function GET(request: NextRequest) {
-  const statusFilter = request.nextUrl.searchParams.get("status")?.split(",").filter(Boolean) as RoadStatus[] | undefined;
-  const withGeometry = request.nextUrl.searchParams.get("geometry") === "true";
+  const parsed = querySchema.safeParse(Object.fromEntries(request.nextUrl.searchParams));
+  if (!parsed.success) return errorResponse("INVALID_QUERY", z.prettifyError(parsed.error), 400);
+  const { status: statusFilter, geometry } = parsed.data;
   try {
     const network = await loadRoadNetwork();
     const segments = network.segments
-      .filter((s) => !statusFilter?.length || statusFilter.includes(s.status))
+      .filter((s) => statusFilter.length === 0 || statusFilter.includes(s.status))
       .map(({ id, name, status, description, updatedAt, lines }) => ({
         id,
         name,
         status,
         description,
         updatedAt,
-        ...(withGeometry ? { lines: lines.map((l) => l.map((p) => [p.lon, p.lat])) } : {}),
+        ...(geometry === "true" ? { lines: lines.map((l) => l.map((p) => [p.lon, p.lat])) } : {}),
       }));
     const counts = network.segments.reduce<Record<string, number>>((acc, s) => ({ ...acc, [s.status]: (acc[s.status] ?? 0) + 1 }), {});
     return Response.json({

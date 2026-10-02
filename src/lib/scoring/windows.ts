@@ -35,7 +35,8 @@ export function findBestWindow(slots: ScoredSlot[]): ViewingWindow | null {
     let j = i;
     let total = 0;
     let peakIndex = i;
-    while (j < slots.length && slots[j].reachable && slots[j].score >= threshold) {
+    // A run only continues through consecutive slots: a gap in the data ends the window.
+    while (j < slots.length && slots[j].reachable && slots[j].score >= threshold && (j === i || slots[j].time - slots[j - 1].time === SLOT_MS)) {
       total += slots[j].score;
       if (slots[j].score > slots[peakIndex].score) peakIndex = j;
       j++;

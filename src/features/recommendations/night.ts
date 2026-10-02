@@ -7,7 +7,8 @@ import { HOUR, icelandDate, MINUTE } from "@/lib/time";
 export const NIGHT_SUN_ALTITUDE = -6;
 /** "Dark skies" in the UI = end of nautical twilight. */
 export const DARK_SKY_ALTITUDE = -12;
-const MAX_NIGHT_MS = 18 * HOUR;
+/** Near the December solstice the far north stays below −6° for ~20 hours. */
+const MAX_NIGHT_MS = 24 * HOUR;
 const SEARCH_HORIZON_MS = 30 * HOUR;
 const MIN_REMAINING_MS = 60 * MINUTE;
 

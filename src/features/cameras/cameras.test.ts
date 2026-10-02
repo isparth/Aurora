@@ -38,4 +38,14 @@ describe("normaliseCameras / cameraMetadata", () => {
   it("rejects feeds with a broken shape", () => {
     expect(() => normaliseCameras([{ foo: 1 }])).toThrow();
   });
+
+  it("drops cameras whose image URL is not IRCA over HTTPS, so the proxy can't be pointed elsewhere", () => {
+    const poisoned = [
+      { ...raw[0], Slod: "http://www.vegagerdin.is/vgdata/vefmyndavelar/a.jpg" },
+      { ...raw[0], Slod: "https://evil.example/vegagerdin.is/b.jpg" },
+      { ...raw[0], Slod: "https://vegagerdin.is.evil.example/c.jpg" },
+      raw[1],
+    ];
+    expect(normaliseCameras(poisoned).map((c) => c.id)).toEqual(["gjabakki_3"]);
+  });
 });

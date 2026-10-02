@@ -24,6 +24,12 @@ describe("findBestWindow", () => {
     expect(w?.peakScore).toBe(72);
   });
 
+  it("never bridges a gap in the data", () => {
+    const withGap = slots([90, 91, 92]).map((s, i) => (i === 2 ? { ...s, time: s.time + 2 * SLOT_MS } : s));
+    const w = findBestWindow(withGap);
+    expect(w?.endIndex).toBe(1);
+  });
+
   it("returns null when nothing is reachable or everything scores zero", () => {
     expect(findBestWindow(slots([80, 90], 5))).toBeNull();
     expect(findBestWindow(slots([0, 0, 0]))).toBeNull();

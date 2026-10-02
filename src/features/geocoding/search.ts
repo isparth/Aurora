@@ -5,6 +5,7 @@ import { VIEWING_LOCATIONS } from "@/data/viewing-locations";
 import { cached } from "@/lib/cache";
 import { haversineKm, ICELAND_BOUNDS } from "@/lib/geo";
 import { fetchJson } from "@/lib/http";
+import { createRateBudget } from "@/lib/rate-budget";
 import { HOUR } from "@/lib/time";
 
 export type PlaceSuggestion = {
@@ -18,6 +19,8 @@ export type PlaceSuggestion = {
 
 const PHOTON_URL = process.env.PHOTON_BASE_URL || "https://photon.komoot.io";
 const MAX_RESULTS = 8;
+/** Photon's public instance is fair-use; beyond this, search falls back to local results. */
+const spendPhoton = createRateBudget("photon", 120);
 
 /** "Þingvellir" → "thingvellir", "Höfn" → "hofn", so people can type without Icelandic letters. */
 export function normaliseName(s: string): string {
@@ -80,6 +83,7 @@ export async function searchPhoton(query: string): Promise<PlaceSuggestion[]> {
   const { minLon, minLat, maxLon, maxLat } = ICELAND_BOUNDS;
   const params = new URLSearchParams({ q, limit: "8", bbox: `${minLon},${minLat},${maxLon},${maxLat}` });
   return cached(`photon:${normaliseName(q)}`, 24 * HOUR, async () => {
+    spendPhoton();
     const parsed = photonSchema.parse(await fetchJson(`${PHOTON_URL}/api/?${params}`, { timeoutMs: 4000 }));
     return parsed.features.flatMap((f): PlaceSuggestion[] => {
       const p = f.properties;

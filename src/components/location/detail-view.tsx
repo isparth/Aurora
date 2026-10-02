@@ -104,7 +104,7 @@ export function DetailView({ detail, location, params }: { detail: LocationDetai
       )}
 
       {rec && (
-        <dl className="mt-6 grid grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)_minmax(0,1fr)] gap-3 rounded-2xl border border-line bg-surface p-4 whitespace-nowrap sm:p-5">
+        <dl className="mt-6 grid grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)_minmax(0,1fr)] gap-3 rounded-2xl border border-line bg-surface p-4 sm:p-5 [&_dd:first-of-type]:whitespace-nowrap">
           <div>
             <dt className="text-xs text-ink-subtle">{detail.origin ? "Drive" : "Travel"}</dt>
             <dd className="tabular mt-1 font-semibold">{detail.origin ? driveText(rec.travel).replace(" drive", "") : "—"}</dd>
