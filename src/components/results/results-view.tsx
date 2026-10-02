@@ -42,10 +42,23 @@ export function ResultsView({ data, params }: { data: RecommendationResponse; pa
   const now = useNow(data.now, { frozen: data.demo });
   const viewToggleRef = useRef<HTMLDivElement>(null);
 
+  const bestWindowEnd = data.recommendations[0]?.bestWindow?.end;
+  const lastRefreshRef = useRef(0);
+  const refresh = () => {
+    lastRefreshRef.current = Date.now();
+    startRefresh(() => router.refresh());
+  };
   useEffect(() => {
-    if (data.demo) return;
+    if (data.demo || pending) return;
     const refreshIfStale = () => {
-      if (document.visibilityState === "visible" && Date.now() - Date.parse(data.generatedAt) > STALE_AFTER) startRefresh(() => router.refresh());
+      // At most one automatic refresh every couple of minutes, and only while the page is on screen.
+      if (document.visibilityState !== "visible" || Date.now() - lastRefreshRef.current < 2 * MINUTE) return;
+      const age = Date.now() - Date.parse(data.generatedAt);
+      const windowOver = bestWindowEnd !== undefined && Date.now() > Date.parse(bestWindowEnd) && age > MINUTE;
+      if (age > STALE_AFTER || windowOver) {
+        lastRefreshRef.current = Date.now();
+        startRefresh(() => router.refresh());
+      }
     };
     document.addEventListener("visibilitychange", refreshIfStale);
     const id = setInterval(refreshIfStale, MINUTE);
@@ -53,7 +66,7 @@ export function ResultsView({ data, params }: { data: RecommendationResponse; pa
       document.removeEventListener("visibilitychange", refreshIfStale);
       clearInterval(id);
     };
-  }, [data.generatedAt, data.demo, router]);
+  }, [data.generatedAt, data.demo, router, bestWindowEnd, pending]);
 
   const best = data.recommendations[0];
   const others = data.recommendations.slice(1);
@@ -113,7 +126,7 @@ export function ResultsView({ data, params }: { data: RecommendationResponse; pa
           </div>
 
           <div className="mt-7">
-            <VerdictHeader data={data} now={now} onRefresh={() => startRefresh(() => router.refresh())} refreshing={refreshing} />
+            <VerdictHeader data={data} now={now} onRefresh={refresh} refreshing={refreshing} />
           </div>
 
           {!outsideCoverage && (
@@ -121,7 +134,13 @@ export function ResultsView({ data, params }: { data: RecommendationResponse; pa
               <p id="drive-label" className="mb-1.5 text-xs text-ink-subtle">
                 How far will you drive?
               </p>
-              <SegmentedControl label="How far will you drive?" options={MODE_OPTIONS} value={pendingMode ?? data.travelMode} onChange={changeMode} />
+              <SegmentedControl
+                label="How far will you drive?"
+                options={MODE_OPTIONS}
+                value={pendingMode ?? data.travelMode}
+                onChange={changeMode}
+                activateOnArrow={false}
+              />
               <p className="sr-only" aria-live="polite">
                 {pending ? "Updating recommendations…" : ""}
               </p>

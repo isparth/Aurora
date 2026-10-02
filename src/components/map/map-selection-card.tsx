@@ -11,9 +11,9 @@ import { formatDuration } from "@/lib/time";
 /** What you tapped on the map, with the two things you can do next. */
 export function MapSelectionCard({ rec, detailHref }: { rec: Recommendation; detailHref: string }) {
   return (
-    <div className="pointer-events-auto rounded-xl border border-line-strong bg-night-900/95 p-3.5 shadow-2xl backdrop-blur-xl" aria-live="polite">
+    <div className="pointer-events-auto rounded-xl border border-line-strong bg-night-900/95 p-3.5 shadow-2xl backdrop-blur-xl">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
+        <div className="min-w-0" aria-live="polite">
           <p className="text-[11px] font-medium tracking-wide text-ink-subtle uppercase">{rec.recommended ? `#${rec.rank} tonight` : "Not recommended"}</p>
           <p className="truncate text-base font-semibold">{rec.location.name}</p>
           {rec.recommended ? (

@@ -89,7 +89,7 @@ export function DetailView({ detail, location, params }: { detail: LocationDetai
               </span>
               <span className={`flex items-center text-lg font-medium ${styleFor(rec.viewingScore).text}`}>
                 {opportunityLabel(rec.viewingScore)} tonight
-                <ViewingScoreTip align="start" />
+                <ViewingScoreTip />
               </span>
             </p>
           ) : (
@@ -98,7 +98,7 @@ export function DetailView({ detail, location, params }: { detail: LocationDetai
           {rec?.bestWindow && (
             <div className="mt-3 flex items-center">
               <ConfidenceChip value={rec.confidence} />
-              <ConfidenceTip align="start" />
+              <ConfidenceTip />
             </div>
           )}
         </div>

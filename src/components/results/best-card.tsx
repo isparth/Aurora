@@ -30,7 +30,7 @@ function ScoreRing({ score }: { score: number }) {
       </div>
       <span className={`mt-1 flex items-center text-xs font-semibold ${LABEL_STYLE[label].text}`}>
         {label}
-        <ViewingScoreTip align="end" />
+        <ViewingScoreTip />
       </span>
       <span className="sr-only">Viewing score {score} out of 100</span>
     </div>
@@ -52,8 +52,11 @@ export function BestCard({ rec, detailHref, auroraActivity, now }: { rec: Recomm
   const shareText = `Northern lights plan: ${rec.location.name}. ${leave.label} ${leave.value}, best viewing ${window.value}.`;
 
   return (
-    <article aria-labelledby="best-title" className="relative overflow-hidden rounded-2xl border border-line bg-gradient-to-b from-white/[0.07] to-white/[0.015] p-5 sm:p-6">
-      <div aria-hidden className="pointer-events-none absolute -top-28 -right-20 h-64 w-64 rounded-full bg-aurora-400/14 blur-3xl" />
+    <article aria-labelledby="best-title" className="relative rounded-2xl border border-line bg-gradient-to-b from-white/[0.07] to-white/[0.015] p-5 sm:p-6">
+      {/* The glow is clipped on its own layer so pop-up tips inside the card are never cut off. */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl">
+        <div className="absolute -top-28 -right-20 h-64 w-64 rounded-full bg-aurora-400/14 blur-3xl" />
+      </div>
 
       <div className="relative flex items-start justify-between gap-4">
         <div className="min-w-0">
@@ -130,7 +133,7 @@ export function BestCard({ rec, detailHref, auroraActivity, now }: { rec: Recomm
 
       <div className="relative mt-5 flex items-center">
         <ConfidenceChip value={rec.confidence} />
-        <ConfidenceTip align="start" />
+        <ConfidenceTip />
       </div>
     </article>
   );

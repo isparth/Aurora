@@ -30,6 +30,10 @@ describe("planTimes", () => {
     expect(planTimes(rec, at("02:00", 3)).window).toMatchObject({ over: true, sub: "This window has passed" });
   });
 
+  it("stops telling you to leave once the window is over", () => {
+    expect(planTimes(rec, at("02:00", 3)).leave).toMatchObject({ value: "—", urgent: false });
+  });
+
   it("handles being at the spot already", () => {
     const here = { ...rec, travel: { ...rec.travel, durationMinutes: 0 } };
     expect(planTimes(here, at("22:00")).leave).toMatchObject({ value: "You're here", sub: "Look up now" });
@@ -53,6 +57,10 @@ describe("verdict", () => {
 
   it("is honest when it's cloudy everywhere", () => {
     expect(verdict(response(30), at("19:40")).summary).toMatch(/^Mostly cloudy nearby\. Best bet: Þingvellir/);
+  });
+
+  it("doesn't keep repeating a plan whose window has ended", () => {
+    expect(verdict(response(89), at("02:00", 3))).toEqual({ headline: "Tonight's best window has passed", summary: "Checking for anything later tonight…" });
   });
 
   it("explains empty results and blocked roads", () => {

@@ -28,7 +28,7 @@ function geolocationMessage(error: GeolocationPositionError): string {
 }
 
 const chipClass =
-  "inline-flex min-h-10 items-center gap-1.5 rounded-full border border-line bg-surface px-3.5 text-sm text-ink-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-60";
+  "inline-flex min-h-11 items-center gap-1.5 rounded-full border border-line bg-surface px-4 text-sm text-ink-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-60";
 
 export function LocationForm({ className = "" }: { className?: string }) {
   const router = useRouter();

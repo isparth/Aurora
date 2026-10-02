@@ -6,7 +6,7 @@ import { activityWord, darkHours } from "@/lib/format";
 import { verdict } from "@/lib/plan-time";
 import { formatRelative } from "@/lib/time";
 
-const chip = "inline-flex min-h-8 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-xs text-ink-muted";
+const chip = "inline-flex min-h-10 items-center gap-1.5 rounded-full border border-line bg-surface px-3.5 text-xs text-ink-muted";
 
 /** The answer first: can I see the aurora tonight, where, and when to leave. */
 export function VerdictHeader({
@@ -41,7 +41,7 @@ export function VerdictHeader({
           ) : (
             <span>Aurora forecast unavailable</span>
           )}
-          <AuroraActivityTip align="start" />
+          <AuroraActivityTip />
         </li>
         {dark && (
           <li className={chip}>

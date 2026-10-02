@@ -4,13 +4,18 @@ import { useRef, type KeyboardEvent } from "react";
 
 export type SegmentOption<T extends string> = { value: T; label: string; hint?: string };
 
-/** Accessible single-choice control (WAI-ARIA radio group with roving focus). */
+/**
+ * Accessible single-choice control (WAI-ARIA radio group with roving focus). Arrow keys select
+ * immediately by default; set `activateOnArrow={false}` when a change is expensive (e.g. it
+ * triggers a new search), so arrows only move focus and Enter/Space confirms.
+ */
 export function SegmentedControl<T extends string>({
   label,
   options,
   value,
   onChange,
   disabled = false,
+  activateOnArrow = true,
   className = "",
 }: {
   label: string;
@@ -18,6 +23,7 @@ export function SegmentedControl<T extends string>({
   value: T;
   onChange: (value: T) => void;
   disabled?: boolean;
+  activateOnArrow?: boolean;
   className?: string;
 }) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -28,7 +34,7 @@ export function SegmentedControl<T extends string>({
     event.preventDefault();
     const next = (index + delta + options.length) % options.length;
     refs.current[next]?.focus();
-    onChange(options[next].value);
+    if (activateOnArrow) onChange(options[next].value);
   };
 
   return (
@@ -46,7 +52,7 @@ export function SegmentedControl<T extends string>({
             aria-checked={selected}
             tabIndex={selected ? 0 : -1}
             disabled={disabled}
-            onClick={() => onChange(option.value)}
+            onClick={() => !selected && onChange(option.value)}
             onKeyDown={(e) => onKeyDown(e, index)}
             className={`flex min-h-11 flex-1 flex-col items-center justify-center rounded-lg px-2 py-1.5 text-center transition-colors ${
               selected ? "bg-white/10 text-ink" : "text-ink-muted hover:text-ink"

@@ -28,7 +28,9 @@ export function planTimes(rec: PlanInput, now: number): PlanTimes {
 
   let leave: PlanTimes["leave"];
   const departure = rec.recommendedDeparture ? Date.parse(rec.recommendedDeparture) : null;
-  if (rec.travel.durationMinutes === 0) {
+  if (window.over) {
+    leave = { label: "Leave", value: "—", sub: "Tonight's best window has passed", urgent: false };
+  } else if (rec.travel.durationMinutes === 0) {
     leave = { label: "Where", value: "You're here", sub: window.live ? "Look up now" : null, urgent: false };
   } else if (departure === null || start === null) {
     leave = { label: "Leave", value: "—", sub: null, urgent: false };
@@ -63,7 +65,9 @@ export function verdict(data: RecommendationResponse, now: number): { headline: 
 
   const { leave, window } = planTimes(best, now);
   const label = scoreLabel(best.viewingScore);
-  const w = best.bestWindow!;
+  const w = best.bestWindow;
+  if (!w) return { headline: HEADLINE[label], summary: null };
+  if (window.over) return { headline: "Tonight's best window has passed", summary: "Checking for anything later tonight…" };
   const where = label === "Poor" ? `Mostly cloudy nearby. Best bet: ${best.location.name}` : `Clearest at ${best.location.name}`;
   const when = window.live ? `right now, until ${formatTime(w.end)}` : `from ${formatTime(w.start)} to ${formatTime(w.end)}`;
   const go =
