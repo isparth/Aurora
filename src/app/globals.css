@@ -1,26 +1,135 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@theme {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-night-950: #03050a;
+  --color-night-900: #070b14;
+  --color-night-800: #0c1322;
+  --color-night-700: #131c30;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  --color-ink: #eef2f8;
+  --color-ink-muted: #a6b0c2;
+  --color-ink-subtle: #737f94;
+  --color-line: rgb(255 255 255 / 0.09);
+  --color-line-strong: rgb(255 255 255 / 0.16);
+  --color-surface: rgb(255 255 255 / 0.035);
+  --color-surface-raised: rgb(255 255 255 / 0.06);
+
+  --color-aurora-200: #b3f5d8;
+  --color-aurora-300: #74e9b8;
+  --color-aurora-400: #3fd59a;
+  --color-glacier-300: #8fd3f4;
+  --color-dusk-300: #b9a8f5;
+
+  --color-score-excellent: #74e9b8;
+  --color-score-good: #9fdcf0;
+  --color-score-fair: #f2cf7c;
+  --color-score-poor: #f2a3ad;
+
+  --color-warn: #f2cf7c;
+  --color-danger: #f28b97;
+
+  --animate-aurora-drift: aurora-drift 26s ease-in-out infinite alternate;
+
+  @keyframes aurora-drift {
+    0% {
+      transform: translate3d(-6%, 0, 0) rotate(-4deg) scaleY(1);
+    }
+    100% {
+      transform: translate3d(6%, 2%, 0) rotate(3deg) scaleY(1.15);
+    }
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer base {
+  html {
+    background-color: var(--color-night-950);
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: var(--color-night-950);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv11";
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  ::selection {
+    background: rgb(116 233 184 / 0.3);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-aurora-300);
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .safe-bottom {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  /* A faint, fixed star field. Decorative only. */
+  .starfield {
+    background-image:
+      radial-gradient(1px 1px at 12% 18%, rgb(255 255 255 / 0.55) 50%, transparent 51%),
+      radial-gradient(1px 1px at 28% 72%, rgb(255 255 255 / 0.35) 50%, transparent 51%),
+      radial-gradient(1.2px 1.2px at 46% 32%, rgb(255 255 255 / 0.5) 50%, transparent 51%),
+      radial-gradient(1px 1px at 63% 12%, rgb(255 255 255 / 0.4) 50%, transparent 51%),
+      radial-gradient(1px 1px at 78% 58%, rgb(255 255 255 / 0.3) 50%, transparent 51%),
+      radial-gradient(1.3px 1.3px at 88% 26%, rgb(255 255 255 / 0.55) 50%, transparent 51%),
+      radial-gradient(1px 1px at 6% 52%, rgb(255 255 255 / 0.3) 50%, transparent 51%),
+      radial-gradient(1px 1px at 38% 90%, rgb(255 255 255 / 0.25) 50%, transparent 51%),
+      radial-gradient(1px 1px at 56% 64%, rgb(255 255 255 / 0.25) 50%, transparent 51%),
+      radial-gradient(1px 1px at 94% 84%, rgb(255 255 255 / 0.3) 50%, transparent 51%);
+    background-size: 420px 420px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* MapLibre controls, restyled for the dark UI. */
+.maplibregl-ctrl-group {
+  background: rgb(12 19 34 / 0.85) !important;
+  border: 1px solid var(--color-line) !important;
+  box-shadow: none !important;
+  backdrop-filter: blur(8px);
+}
+
+.maplibregl-ctrl-group button + button {
+  border-top-color: var(--color-line) !important;
+}
+
+.maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+  filter: invert(1) brightness(0.85);
+}
+
+.maplibregl-ctrl-attrib {
+  background: rgb(7 11 20 / 0.7) !important;
+  color: var(--color-ink-subtle) !important;
+  font-size: 10px !important;
+}
+
+.maplibregl-ctrl-attrib a {
+  color: var(--color-ink-muted) !important;
+}
+
+.maplibregl-ctrl-attrib-button {
+  filter: invert(1);
 }

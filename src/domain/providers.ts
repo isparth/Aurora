@@ -21,6 +21,8 @@ export interface WeatherProvider {
 
 export interface RoutingProvider {
   readonly name: Route["source"];
+  /** Polite upper bound on parallel requests to this provider. */
+  readonly maxConcurrency?: number;
   route(origin: Coordinates, destination: Coordinates): Promise<Route>;
 }
 

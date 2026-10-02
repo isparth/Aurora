@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 480" width="640" height="480">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#05080f"/>
+      <stop offset="0.55" stop-color="#0b1422"/>
+      <stop offset="0.7" stop-color="#101a28"/>
+    </linearGradient>
+    <linearGradient id="land" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0a0d12"/>
+      <stop offset="1" stop-color="#050608"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="480" fill="url(#sky)"/>
+  <g fill="#dfe8f5">
+    <circle cx="62" cy="58" r="1.2"/><circle cx="140" cy="102" r="0.9"/><circle cx="214" cy="44" r="1.3"/>
+    <circle cx="300" cy="86" r="0.8"/><circle cx="352" cy="38" r="1.1"/><circle cx="420" cy="118" r="0.9"/>
+    <circle cx="488" cy="66" r="1.4"/><circle cx="560" cy="96" r="1"/><circle cx="604" cy="40" r="0.8"/>
+    <circle cx="96" cy="150" r="0.8"/><circle cx="262" cy="160" r="1"/><circle cx="530" cy="168" r="0.9"/>
+  </g>
+  <path d="M0 268 L90 238 L170 252 L260 224 L340 246 L430 230 L520 250 L640 232 L640 480 L0 480 Z" fill="url(#land)"/>
+  <path d="M180 480 L300 300 L330 300 L460 480 Z" fill="#14171c"/>
+  <path d="M314 300 L316 480" stroke="#3a3f47" stroke-width="2" stroke-dasharray="14 18"/>
+  <rect x="0" y="0" width="640" height="28" fill="#000"/>
+  <text x="18" y="20" font-family="Arial, sans-serif" font-size="16" fill="#fff">Gjábakki - norður (demo)</text>
+  <rect x="0" y="452" width="640" height="28" fill="#000"/>
+  <text x="18" y="472" font-family="Arial, sans-serif" font-size="15" fill="#fff">Illustration for the demo scenario — not a real camera image</text>
+</svg>

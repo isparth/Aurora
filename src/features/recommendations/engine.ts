@@ -297,7 +297,7 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
   const notices: string[] = [];
 
   const respond = (partial: Partial<RecommendationResponse>): RecommendationResponse => ({
-    generatedAt: new Date().toISOString(),
+    generatedAt: iso(now),
     now: iso(now),
     demo: ctx.demo,
     origin,
@@ -377,7 +377,9 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
   if (provisional.length === 0) return respond({ night: nightDto, aurora, emptyReason: "no-window" });
 
   // Phase 4 — route only the strongest candidates.
-  const routeResults = await mapWithConcurrency(provisional, 3, (p) => providers.routing.route(origin, p.s.point));
+  const routeResults = await mapWithConcurrency(provisional, providers.routing.maxConcurrency ?? 3, (p) =>
+    providers.routing.route(origin, p.s.point),
+  );
   const travels: Route[] = routeResults.map((r, i) => (r.status === "fulfilled" ? r.value : provisional[i].s.estimate));
   const routeFailures = routeResults.filter((r) => r.status === "rejected").length;
   if (providers.routing.name === "estimate") {
@@ -488,7 +490,7 @@ export async function evaluateLocation(
   const notices: string[] = [];
 
   const base: LocationDetail = {
-    generatedAt: new Date().toISOString(),
+    generatedAt: iso(now),
     now: iso(now),
     demo: ctx.demo,
     origin,

@@ -45,3 +45,6 @@ next-env.d.ts
 
 # maplibre worker copied from node_modules at install/build time
 /public/maplibre/
+
+# local browser-automation artefacts
+/.playwright-mcp/

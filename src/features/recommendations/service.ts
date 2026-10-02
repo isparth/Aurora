@@ -1,33 +1,32 @@
 import { nearestTown } from "@/data/towns";
 import { VIEWING_LOCATIONS } from "@/data/viewing-locations";
-import type { RoadConditionProvider } from "@/domain/providers";
 import type { LocationDetail, Origin, RecommendationResponse, TravelMode } from "@/domain/types";
 import { imoAuroraProvider } from "@/features/aurora/imo-provider";
-import { estimateRoutingProvider } from "@/features/routing/estimate";
+import { ircaCameraProvider } from "@/features/cameras/irca-cameras";
+import { selectVisionProvider } from "@/features/cameras/vision";
+import { DEMO_NOW, demoContext } from "@/features/demo/demo-providers";
+import { ircaRoadProvider } from "@/features/roads/irca-provider";
+import { selectRoutingProvider } from "@/features/routing/providers";
 import { openMeteoProvider } from "@/features/weather/open-meteo-provider";
 
 import { evaluateLocation, recommend, type EngineContext } from "./engine";
-
-const unavailableRoads: RoadConditionProvider = {
-  assess: async () => {
-    throw new Error("Road condition service not configured");
-  },
-};
 
 export function liveContext(): EngineContext {
   return {
     providers: {
       aurora: imoAuroraProvider,
       weather: openMeteoProvider,
-      routing: estimateRoutingProvider,
-      roads: unavailableRoads,
-      cameras: null,
-      vision: null,
+      routing: selectRoutingProvider(),
+      roads: ircaRoadProvider,
+      cameras: ircaCameraProvider,
+      vision: selectVisionProvider(),
     },
     locations: VIEWING_LOCATIONS,
     demo: false,
   };
 }
+
+const contextFor = (demo?: boolean) => (demo ? { ctx: demoContext(), now: DEMO_NOW } : { ctx: liveContext(), now: Date.now() });
 
 export function resolveOrigin(lat: number, lon: number, label?: string | null): Origin {
   const clean = label?.trim().slice(0, 80);
@@ -43,7 +42,8 @@ export async function getRecommendations(params: {
   travelMode: TravelMode;
   demo?: boolean;
 }): Promise<RecommendationResponse> {
-  return recommend({ origin: resolveOrigin(params.lat, params.lon, params.label), travelMode: params.travelMode, now: Date.now() }, liveContext());
+  const { ctx, now } = contextFor(params.demo);
+  return recommend({ origin: resolveOrigin(params.lat, params.lon, params.label), travelMode: params.travelMode, now }, ctx);
 }
 
 export async function getLocationDetail(params: {
@@ -52,7 +52,9 @@ export async function getLocationDetail(params: {
   lon?: number | null;
   label?: string | null;
   travelMode: TravelMode;
+  demo?: boolean;
 }): Promise<LocationDetail | null> {
+  const { ctx, now } = contextFor(params.demo);
   const origin = params.lat != null && params.lon != null ? resolveOrigin(params.lat, params.lon, params.label) : null;
-  return evaluateLocation({ locationId: params.id, origin, travelMode: params.travelMode, now: Date.now() }, liveContext());
+  return evaluateLocation({ locationId: params.id, origin, travelMode: params.travelMode, now }, ctx);
 }
