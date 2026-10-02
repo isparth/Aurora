@@ -1,6 +1,6 @@
 import type { NightWindow, Recommendation, RoadStatus } from "@/domain/types";
 
-import { formatDuration, formatRange, formatTime } from "./time";
+import { formatDuration, formatRange } from "./time";
 
 export const pct = (fraction: number) => `${Math.round(fraction * 100)}%`;
 
@@ -12,9 +12,6 @@ export function activityWord(activity: number): string {
 }
 
 export const windowText = (w: Recommendation["bestWindow"]) => (w ? formatRange(w.start, w.end) : "—");
-
-export const leaveText = (r: Pick<Recommendation, "leaveNow" | "recommendedDeparture">) =>
-  r.leaveNow ? "Leave now" : r.recommendedDeparture ? `Leave around ${formatTime(r.recommendedDeparture)}` : "—";
 
 export const driveText = (t: Recommendation["travel"]) =>
   t.durationMinutes === 0 ? "You're here" : `${formatDuration(t.durationMinutes)} drive`;

@@ -7,7 +7,8 @@ import { TonightGlance } from "@/components/home/tonight-glance";
 import { SiteFooter } from "@/components/site-footer";
 import { getTonightGlance } from "@/features/recommendations/service";
 
-/** Regenerated every 15 minutes, matching the aurora forecast cache — the page itself stays static. */
+/** Prerendered and regenerated every 15 minutes (matching the aurora forecast cache), so visits don't run a function. */
+export const dynamic = "force-static";
 export const revalidate = 900;
 
 const STEPS = [

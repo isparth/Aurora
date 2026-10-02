@@ -1,25 +1,31 @@
 "use client";
 
-import { ArrowLeft, Car, Navigation, ParkingSquare, Snowflake } from "lucide-react";
+import { ArrowLeft, Car, ChevronDown, Navigation, ParkingSquare, Snowflake } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
 import { Wordmark } from "@/components/brand/wordmark";
 import { MapPanel } from "@/components/map/map-panel";
+import { AuroraTips } from "@/components/results/aurora-tips";
 import { ReasonList } from "@/components/results/reason-list";
 import { SiteFooter } from "@/components/site-footer";
 import { buttonClass } from "@/components/ui/button";
 import { ConfidenceChip } from "@/components/ui/confidence";
+import { ConfidenceTip, ViewingScoreTip } from "@/components/ui/glossary";
 import { styleFor } from "@/components/ui/score";
+import { ShareButton } from "@/components/ui/share-button";
 import type { LocationDetail, ViewingLocation } from "@/domain/types";
-import { distanceText, driveText, leaveText, windowText } from "@/lib/format";
 import { directionsHref, resultsHref, type PlaceParams } from "@/lib/links";
+import { planTimes } from "@/lib/plan-time";
 import { opportunityLabel, scoreLabel } from "@/lib/scoring/labels";
 import { formatTime } from "@/lib/time";
+import { useNow } from "@/lib/use-now";
 
+import { BeforeYouGo } from "./before-you-go";
 import { ScoreBreakdown } from "./breakdown";
 import { CameraCard } from "./camera-card";
 import { ConditionsGrid } from "./conditions-grid";
+import { PlanStrip } from "./plan-strip";
 import { RoadCard } from "./road-card";
 import { TimelineChart } from "./timeline-chart";
 
@@ -51,14 +57,17 @@ export function DetailView({ detail, location, params }: { detail: LocationDetai
     return hourly.reduce((best, h, i) => (h.score > hourly[best].score ? i : best), 0);
   })();
   const [selectedIndex, setSelectedIndex] = useState(defaultIndex);
+  const now = useNow(detail.now, { frozen: detail.demo });
   const slot = hourly[selectedIndex];
   const backHref = detail.origin ? resultsHref({ ...params }) : "/";
   const visionEnabled = detail.dataStatus.vision.state !== "disabled";
+  const plan = rec ? planTimes(rec, now) : null;
+  const shareText = plan ? `Northern lights plan: ${location.name}. ${plan.leave.label} ${plan.leave.value}, best viewing ${plan.window.value}.` : location.name;
 
   return (
     <div className="mx-auto max-w-5xl px-5 pt-5 pb-32 sm:px-8 lg:pb-16">
       <div className="flex items-center justify-between gap-3">
-        <Link href={backHref} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2 text-sm text-ink-muted hover:bg-white/5 hover:text-ink">
+        <Link href={backHref} className="inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-sm text-ink-muted hover:bg-white/5 hover:text-ink">
           <ArrowLeft aria-hidden className="h-4 w-4" />
           {detail.origin ? "All spots" : "Home"}
         </Link>
@@ -68,27 +77,36 @@ export function DetailView({ detail, location, params }: { detail: LocationDetai
         </div>
       </div>
 
-      <header className="mt-8 grid gap-6 lg:grid-cols-[1fr_auto] lg:items-end">
+      <header className="mt-7 grid gap-5 lg:grid-cols-[1fr_auto] lg:items-end">
         <div>
           <p className="text-sm text-ink-subtle">{location.region}</p>
           <h1 className="mt-1 text-[2rem] leading-tight font-semibold tracking-tight text-balance sm:text-4xl">{location.name}</h1>
           {rec && rec.bestWindow ? (
-            <p className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span className="tabular text-5xl font-semibold tracking-tight">
+            <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="tabular text-4xl font-semibold tracking-tight">
                 {rec.viewingScore}
-                <span className="text-2xl text-ink-subtle"> / 100</span>
+                <span className="text-xl text-ink-subtle"> / 100</span>
               </span>
-              <span className={`text-lg font-medium ${styleFor(rec.viewingScore).text}`}>{opportunityLabel(rec.viewingScore)} tonight</span>
+              <span className={`flex items-center text-lg font-medium ${styleFor(rec.viewingScore).text}`}>
+                {opportunityLabel(rec.viewingScore)} tonight
+                <ViewingScoreTip align="start" />
+              </span>
             </p>
           ) : (
             <p className="mt-3 text-lg text-ink-muted">{rec ? "No reachable viewing window tonight." : "Forecast unavailable for tonight."}</p>
           )}
-          {rec?.bestWindow && <ConfidenceChip value={rec.confidence} className="mt-3" />}
+          {rec?.bestWindow && (
+            <div className="mt-3 flex items-center">
+              <ConfidenceChip value={rec.confidence} />
+              <ConfidenceTip align="start" />
+            </div>
+          )}
         </div>
-        <div className="hidden lg:block">
+        <div className="hidden items-center gap-2 lg:flex">
+          <ShareButton title={`Aurora · ${location.name}`} text={shareText} className="border border-line" />
           <a href={directionsHref(location.latitude, location.longitude)} target="_blank" rel="noreferrer" className={buttonClass({ variant: "aurora", size: "lg" })}>
             <Navigation aria-hidden className="h-4 w-4" />
-            Open directions
+            Directions
           </a>
         </div>
       </header>
@@ -104,23 +122,10 @@ export function DetailView({ detail, location, params }: { detail: LocationDetai
       )}
 
       {rec && (
-        <dl className="mt-6 grid grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)_minmax(0,1fr)] gap-3 rounded-2xl border border-line bg-surface p-4 sm:p-5 [&_dd:first-of-type]:whitespace-nowrap">
-          <div>
-            <dt className="text-xs text-ink-subtle">{detail.origin ? "Drive" : "Travel"}</dt>
-            <dd className="tabular mt-1 font-semibold">{detail.origin ? driveText(rec.travel).replace(" drive", "") : "—"}</dd>
-            {detail.origin && <dd className="text-xs text-ink-subtle">{distanceText(rec.travel)}</dd>}
-          </div>
-          <div>
-            <dt className="text-xs text-ink-subtle">Best viewing</dt>
-            <dd className="tabular mt-1 font-semibold">{windowText(rec.bestWindow)}</dd>
-          </div>
-          <div>
-            <dt className="text-xs text-ink-subtle">{detail.origin ? "Leave" : "Be there by"}</dt>
-            <dd className="tabular mt-1 font-semibold text-aurora-300">
-              {detail.origin ? leaveText(rec).replace("Leave around ", "") : rec.bestWindow ? formatTime(rec.bestWindow.start) : "—"}
-            </dd>
-          </div>
-        </dl>
+        <div className="mt-6">
+          <PlanStrip rec={rec} now={now} hasOrigin={Boolean(detail.origin)} />
+          <ShareButton title={`Aurora · ${location.name}`} text={shareText} className="mt-2 -ml-3 lg:hidden" />
+        </div>
       )}
 
       <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
@@ -139,7 +144,7 @@ export function DetailView({ detail, location, params }: { detail: LocationDetai
               <div className="mt-3 rounded-2xl border border-line bg-surface p-4 pt-5">
                 <TimelineChart hourly={hourly} bestWindow={rec.bestWindow} earliestArrival={rec.earliestArrival} selectedIndex={selectedIndex} onSelect={setSelectedIndex} />
               </div>
-              <p className="mt-2 text-xs text-ink-subtle">Tap or use the arrow keys to inspect a time. Times are Iceland time.</p>
+              <p className="mt-2 text-xs text-ink-subtle">Tap a time (or use the arrow keys) to see its conditions below. Times are Iceland time.</p>
             </section>
           )}
 
@@ -148,12 +153,22 @@ export function DetailView({ detail, location, params }: { detail: LocationDetai
               <h2 id="conditions-title" className="text-sm font-semibold">
                 Conditions at {formatTime(slot.time)}
               </h2>
-              <div className="mt-3 grid gap-8 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
-                <ScoreBreakdown components={slot.components} cameraObserved={Boolean(rec.camera?.observation?.usable)} />
+              <div className="mt-3">
                 <ConditionsGrid c={slot.conditions} moon={detail.moon} road={rec.road} location={location} />
               </div>
+              <details className="group mt-4 rounded-xl border border-line px-4 py-3">
+                <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between text-sm text-ink-muted marker:hidden hover:text-ink">
+                  How the {slot.score} at {formatTime(slot.time)} is calculated
+                  <ChevronDown aria-hidden className="h-4 w-4 transition-transform group-open:rotate-180" />
+                </summary>
+                <div className="mt-3 pb-1">
+                  <ScoreBreakdown components={slot.components} cameraObserved={Boolean(rec.camera?.observation?.usable)} />
+                </div>
+              </details>
             </section>
           )}
+
+          {rec && rec.bestWindow && <BeforeYouGo rec={rec} location={location} />}
 
           {rec && rec.bestWindow && (
             <section aria-labelledby="why-title" className="rounded-2xl border border-line bg-surface p-5">
@@ -172,6 +187,8 @@ export function DetailView({ detail, location, params }: { detail: LocationDetai
             {location.notes && <p className="mt-2 text-sm leading-relaxed text-warn">{location.notes}</p>}
             <Access location={location} />
           </section>
+
+          <AuroraTips />
         </div>
 
         <aside className="min-w-0 space-y-6">
@@ -199,8 +216,12 @@ export function DetailView({ detail, location, params }: { detail: LocationDetai
           className="mx-auto flex min-h-14 max-w-xl items-center justify-between gap-3 rounded-xl bg-aurora-300 px-4 text-night-950"
         >
           <span className="min-w-0">
-            <span className="block truncate text-sm font-semibold">Open directions</span>
-            {rec?.bestWindow && <span className="block text-xs opacity-80">{detail.origin ? leaveText(rec) : `Best ${windowText(rec.bestWindow)}`}</span>}
+            <span className="block truncate text-sm font-semibold">Directions to {location.name}</span>
+            {plan && rec?.bestWindow && (
+              <span className="block text-xs opacity-80">
+                {detail.origin ? `${plan.leave.label} ${plan.leave.value}${plan.leave.sub ? ` · ${plan.leave.sub}` : ""}` : `Best ${plan.window.value}`}
+              </span>
+            )}
           </span>
           <Navigation aria-hidden className="h-5 w-5 shrink-0" />
         </a>
