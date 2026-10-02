@@ -1,7 +1,7 @@
 import { nearestTown, REYKJAVIK } from "@/data/towns";
 import { VIEWING_LOCATIONS } from "@/data/viewing-locations";
 import type { LocationDetail, Origin, RecommendationResponse, TravelMode } from "@/domain/types";
-import { imoAuroraProvider } from "@/features/aurora/imo-provider";
+import { activityForNight, imoAuroraProvider } from "@/features/aurora/imo-provider";
 import { ircaCameraProvider } from "@/features/cameras/irca-cameras";
 import { selectVisionProvider } from "@/features/cameras/vision";
 import { DEMO_NOW, demoContext } from "@/features/demo/demo-providers";
@@ -10,6 +10,25 @@ import { selectRoutingProvider } from "@/features/routing/providers";
 import { openMeteoProvider } from "@/features/weather/open-meteo-provider";
 
 import { evaluateLocation, recommend, type EngineContext } from "./engine";
+import { computeNight } from "./night";
+
+export type TonightGlance = {
+  /** Null when IMO is unavailable or has no forecast for tonight. */
+  activity: number | null;
+  /** Reykjavík's dark hours tonight; null in the bright summer months. */
+  dark: { from: string; until: string } | null;
+};
+
+/** A quick, location-free read on tonight for the home page (Reykjavík darkness + IMO activity). */
+export async function getTonightGlance(now = Date.now()): Promise<TonightGlance> {
+  const night = computeNight(REYKJAVIK, now);
+  if (!night) return { activity: null, dark: null };
+  const forecast = await imoAuroraProvider.getForecast().catch(() => null);
+  return {
+    activity: forecast ? activityForNight(forecast, night.eveningDate).activity : null,
+    dark: { from: new Date(night.darkFrom ?? night.start).toISOString(), until: new Date(night.darkUntil ?? night.end).toISOString() },
+  };
+}
 
 export function liveContext(): EngineContext {
   return {

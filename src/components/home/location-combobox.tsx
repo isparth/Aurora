@@ -93,6 +93,7 @@ export function LocationCombobox({
       <input
         ref={inputRef}
         id="location-input"
+        name="q"
         type="text"
         role="combobox"
         aria-autocomplete="list"
@@ -104,7 +105,7 @@ export function LocationCombobox({
         autoComplete="off"
         spellCheck={false}
         enterKeyHint="search"
-        placeholder="Town, hotel or address in Iceland"
+        placeholder="Search a town, hotel or place"
         disabled={disabled}
         value={query}
         onChange={(e) => {

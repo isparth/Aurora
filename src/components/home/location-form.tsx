@@ -1,62 +1,63 @@
 "use client";
 
-import { ArrowRight, Crosshair, Loader2 } from "lucide-react";
+import { ArrowRight, Crosshair, History, Loader2, MapPin } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition, type FormEvent } from "react";
 
 import { buttonClass } from "@/components/ui/button";
+import { TOWNS } from "@/data/towns";
 import type { PlaceSuggestion } from "@/features/geocoding/search";
 import { resultsHref } from "@/lib/links";
+import { saveRecentPlace, useRecentPlaces, type RecentPlace } from "@/lib/recent-places";
 
 import { LocationCombobox } from "./location-combobox";
 
-const REYKJAVIK: PlaceSuggestion = {
-  id: "town:reykjavik",
-  name: "Reykjavík",
-  detail: "Capital Region",
-  lat: 64.1466,
-  lon: -21.9426,
-  kind: "town",
-};
+/** Where most visitors start an aurora evening from. */
+const POPULAR = ["Reykjavík", "Keflavík Airport", "Selfoss", "Vík", "Akureyri", "Höfn"].flatMap((name) => TOWNS.filter((t) => t.name === name));
 
 function geolocationMessage(error: GeolocationPositionError): string {
   switch (error.code) {
     case error.PERMISSION_DENIED:
-      return "Location access is blocked. Allow it for this site in your browser settings, or search for a place below.";
+      return "Location access is blocked. Allow it for this site in your browser settings, or pick a place below.";
     case error.TIMEOUT:
-      return "Finding your position took too long. Try again, or search for a place below.";
+      return "Finding your position took too long. Try again, or pick a place below.";
     default:
-      return "We couldn't determine your position. Search for a place below instead.";
+      return "We couldn't determine your position. Pick a place below instead.";
   }
 }
 
+const chipClass =
+  "inline-flex min-h-10 items-center gap-1.5 rounded-full border border-line bg-surface px-3.5 text-sm text-ink-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-60";
+
 export function LocationForm({ className = "" }: { className?: string }) {
   const router = useRouter();
+  const recent = useRecentPlaces();
   const [isNavigating, startTransition] = useTransition();
   const [locating, setLocating] = useState(false);
+  const [resolving, setResolving] = useState(false);
   const [geoError, setGeoError] = useState<string | null>(null);
-  const [place, setPlace] = useState<PlaceSuggestion | null>(REYKJAVIK);
   const [formError, setFormError] = useState<string | null>(null);
-  const busy = locating || isNavigating;
+  const [pendingName, setPendingName] = useState<string | null>(null);
+  const busy = locating || resolving || isNavigating;
 
-  const go = (href: string) => startTransition(() => router.push(href));
+  const goTo = (place: RecentPlace) => {
+    setFormError(null);
+    setPendingName(place.name);
+    saveRecentPlace({ name: place.name, lat: place.lat, lon: place.lon });
+    startTransition(() => router.push(resultsHref({ lat: place.lat, lon: place.lon, label: place.name })));
+  };
 
   const useMyLocation = () => {
     setGeoError(null);
-    if (!("geolocation" in navigator)) {
-      setGeoError("This browser can't share its location. Search for a place below instead.");
-      return;
-    }
-    if (!window.isSecureContext) {
-      setGeoError("Location needs a secure (https) connection. Search for a place below instead.");
-      return;
-    }
+    if (!("geolocation" in navigator)) return setGeoError("This browser can't share its location. Pick a place below instead.");
+    if (!window.isSecureContext) return setGeoError("Location needs a secure (https) connection. Pick a place below instead.");
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setLocating(false);
-        go(resultsHref({ lat: position.coords.latitude, lon: position.coords.longitude }));
+        setPendingName("__gps");
+        startTransition(() => router.push(resultsHref({ lat: position.coords.latitude, lon: position.coords.longitude })));
       },
       (error) => {
         setLocating(false);
@@ -66,14 +67,32 @@ export function LocationForm({ className = "" }: { className?: string }) {
     );
   };
 
-  const onSubmit = (event: FormEvent) => {
+  /** Typed but didn't pick a suggestion? Use the best match rather than making them choose. */
+  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!place) {
-      setFormError("Choose a place from the suggestions, or use your current location.");
-      return;
+    const q = String(new FormData(event.currentTarget).get("q") ?? "").trim();
+    if (q.length < 2) return setFormError("Type a town, hotel or place in Iceland — or use your current location.");
+    setResolving(true);
+    try {
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`);
+      const first = res.ok ? ((await res.json()) as { results?: PlaceSuggestion[] }).results?.[0] : undefined;
+      if (first) goTo(first);
+      else setFormError(`We couldn't find “${q}” in Iceland. Try a nearby town.`);
+    } catch {
+      setFormError("Search isn't available right now. Pick a starting point below, or use your current location.");
+    } finally {
+      setResolving(false);
     }
-    setFormError(null);
-    go(resultsHref({ lat: place.lat, lon: place.lon, label: place.name }));
+  };
+
+  const chip = (place: RecentPlace, icon: "recent" | "popular") => {
+    const Icon = icon === "recent" ? History : MapPin;
+    return (
+      <button key={`${icon}-${place.name}`} type="button" disabled={busy} onClick={() => goTo(place)} className={chipClass}>
+        {isNavigating && pendingName === place.name ? <Loader2 aria-hidden className="h-3.5 w-3.5 animate-spin" /> : <Icon aria-hidden className="h-3.5 w-3.5" />}
+        {place.name}
+      </button>
+    );
   };
 
   return (
@@ -81,8 +100,8 @@ export function LocationForm({ className = "" }: { className?: string }) {
       <h2 className="text-sm font-medium text-ink-muted">Where are you?</h2>
 
       <button type="button" onClick={useMyLocation} disabled={busy} className={buttonClass({ variant: "primary", size: "lg", block: true, className: "mt-3" })}>
-        {locating ? <Loader2 aria-hidden className="h-5 w-5 animate-spin" /> : <Crosshair aria-hidden className="h-5 w-5" />}
-        {locating ? "Finding your position…" : "Use my current location"}
+        {locating || (isNavigating && pendingName === "__gps") ? <Loader2 aria-hidden className="h-5 w-5 animate-spin" /> : <Crosshair aria-hidden className="h-5 w-5" />}
+        {locating ? "Finding your position…" : isNavigating && pendingName === "__gps" ? "Checking skies near you…" : "Use my current location"}
       </button>
       {geoError && (
         <p role="alert" className="mt-3 rounded-lg border border-warn/30 bg-warn/8 px-3 py-2.5 text-sm text-warn">
@@ -98,22 +117,39 @@ export function LocationForm({ className = "" }: { className?: string }) {
 
       <form onSubmit={onSubmit} noValidate>
         <label htmlFor="location-input" className="sr-only">
-          Search for your location
+          Search for where you are
         </label>
-        <LocationCombobox value={place} onChange={(p) => { setPlace(p); if (p) setFormError(null); }} disabled={busy} invalid={!!formError} describedBy={formError ? "location-error" : undefined} />
+        <LocationCombobox
+          value={null}
+          onChange={(p) => p && goTo(p)}
+          disabled={busy}
+          invalid={!!formError}
+          describedBy={formError ? "location-error" : undefined}
+        />
         {formError && (
           <p id="location-error" role="alert" className="mt-2 text-sm text-danger">
             {formError}
           </p>
         )}
         <button type="submit" disabled={busy} className={buttonClass({ variant: "glass", size: "lg", block: true, className: "mt-3" })}>
-          {isNavigating ? <Loader2 aria-hidden className="h-5 w-5 animate-spin" /> : null}
-          {isNavigating ? "Checking skies, clouds and roads…" : "Find the Northern Lights"}
-          {!isNavigating && <ArrowRight aria-hidden className="h-4 w-4" />}
+          {resolving || (isNavigating && pendingName !== "__gps") ? <Loader2 aria-hidden className="h-5 w-5 animate-spin" /> : null}
+          {resolving || (isNavigating && pendingName !== "__gps") ? "Checking skies, clouds and roads…" : "Find the Northern Lights"}
+          {!resolving && !isNavigating && <ArrowRight aria-hidden className="h-4 w-4" />}
         </button>
       </form>
 
-      <p className="mt-6 text-center text-sm text-ink-subtle">
+      {recent.length > 0 && (
+        <div className="mt-6">
+          <h3 className="text-xs text-ink-subtle">Recent</h3>
+          <div className="mt-2 flex flex-wrap gap-2">{recent.map((p) => chip(p, "recent"))}</div>
+        </div>
+      )}
+      <div className="mt-6">
+        <h3 className="text-xs text-ink-subtle">Popular starting points</h3>
+        <div className="mt-2 flex flex-wrap gap-2">{POPULAR.filter((p) => !recent.some((r) => r.name === p.name)).map((p) => chip(p, "popular"))}</div>
+      </div>
+
+      <p className="mt-6 text-sm text-ink-subtle">
         Just exploring?{" "}
         <Link href={resultsHref({ demo: true })} className="text-ink-muted underline decoration-line-strong underline-offset-4 hover:text-ink">
           See a demo night near Reykjavík
