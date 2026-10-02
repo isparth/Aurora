@@ -29,9 +29,8 @@ export const ROAD_TONE: Record<RoadStatus, string> = {
   unknown: "text-ink-subtle",
 };
 
-export function darkSkyTile(night: NightWindow | null, now: string): { label: string; value: string } {
-  if (!night) return { label: "Dark skies", value: "Not tonight" };
-  if (night.darkFrom && Date.parse(night.darkFrom) > Date.parse(now)) return { label: "Dark skies from", value: formatTime(night.darkFrom) };
-  if (night.darkUntil) return { label: "Dark skies until", value: formatTime(night.darkUntil) };
-  return { label: "Darkness", value: "Twilight only" };
+/** "20:00–06:50": when it's properly dark tonight (falls back to the twilight-dark night). */
+export function darkHours(night: NightWindow | null): string | null {
+  if (!night) return null;
+  return formatRange(night.darkFrom ?? night.start, night.darkUntil ?? night.end);
 }

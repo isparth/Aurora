@@ -3,40 +3,64 @@
 import { MapPin, Navigation } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { Wordmark } from "@/components/brand/wordmark";
 import type { MapDestination } from "@/components/map/aurora-map";
 import { MapPanel } from "@/components/map/map-panel";
+import { MapSelectionCard } from "@/components/map/map-selection-card";
 import { SiteFooter } from "@/components/site-footer";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import type { RecommendationResponse, TravelMode } from "@/domain/types";
 import { TRAVEL_MODES } from "@/features/recommendations/travel-modes";
-import { leaveText } from "@/lib/format";
 import { directionsHref, locationHref, resultsHref, type PlaceParams } from "@/lib/links";
+import { planTimes } from "@/lib/plan-time";
+import { MINUTE } from "@/lib/time";
 import { useMediaQuery } from "@/lib/use-media-query";
+import { useNow } from "@/lib/use-now";
 
+import { AuroraTips } from "./aurora-tips";
 import { BestCard } from "./best-card";
 import { DataSources, Notices } from "./data-sources";
 import { EmptyState } from "./empty-state";
 import { NotRecommendedList, RankedList } from "./ranked-list";
-import { TonightHeader } from "./tonight-header";
+import { VerdictHeader } from "./verdict-header";
+import { WiderOptionCard } from "./wider-option";
 
 const MODE_OPTIONS = (Object.keys(TRAVEL_MODES) as TravelMode[]).map((value) => ({ value, label: TRAVEL_MODES[value].label, hint: TRAVEL_MODES[value].hint }));
+/** Forecasts and roads change; results older than this are refreshed when you come back to the page. */
+const STALE_AFTER = 10 * MINUTE;
 
 export function ResultsView({ data, params }: { data: RecommendationResponse; params: PlaceParams }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [refreshing, startRefresh] = useTransition();
   const [pendingMode, setPendingMode] = useState<TravelMode | null>(null);
   const [view, setView] = useState<"list" | "map">("list");
   const [selectedId, setSelectedId] = useState<string | null>(data.recommendations[0]?.location.id ?? null);
   const isDesktop = useMediaQuery("(min-width: 1024px)");
+  const now = useNow(data.now, { frozen: data.demo });
+  const viewToggleRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (data.demo) return;
+    const refreshIfStale = () => {
+      if (document.visibilityState === "visible" && Date.now() - Date.parse(data.generatedAt) > STALE_AFTER) startRefresh(() => router.refresh());
+    };
+    document.addEventListener("visibilitychange", refreshIfStale);
+    const id = setInterval(refreshIfStale, MINUTE);
+    return () => {
+      document.removeEventListener("visibilitychange", refreshIfStale);
+      clearInterval(id);
+    };
+  }, [data.generatedAt, data.demo, router]);
 
   const best = data.recommendations[0];
   const others = data.recommendations.slice(1);
   const outsideCoverage = data.emptyReason === "outside-coverage";
   const hrefFor = (id: string) => locationHref(id, params);
-  const selected = [...data.recommendations, ...data.notRecommended].find((r) => r.location.id === selectedId) ?? best;
+  const all = [...data.recommendations, ...data.notRecommended];
+  const selected = all.find((r) => r.location.id === selectedId) ?? best ?? all[0];
 
   const destinations = useMemo<MapDestination[]>(
     () =>
@@ -57,17 +81,21 @@ export function ResultsView({ data, params }: { data: RecommendationResponse; pa
     startTransition(() => router.push(resultsHref({ ...params, mode }), { scroll: false }));
   };
 
-  const showMap = destinations.length > 0;
-  const map = showMap ? (
-    <MapPanel
-      origin={data.origin}
-      destinations={destinations}
-      selectedId={selected?.location.id ?? null}
-      onSelect={setSelectedId}
-      route={selected?.travel.geometry}
-      camera={selected?.camera ? { lat: selected.camera.camera.latitude, lon: selected.camera.camera.longitude, name: selected.camera.camera.name } : null}
-    />
-  ) : null;
+  const map =
+    destinations.length > 0 ? (
+      <MapPanel
+        origin={data.origin}
+        destinations={destinations}
+        selectedId={selected?.location.id ?? null}
+        onSelect={setSelectedId}
+        route={selected?.travel.geometry}
+        camera={selected?.camera ? { lat: selected.camera.camera.latitude, lon: selected.camera.camera.longitude, name: selected.camera.camera.name } : null}
+        insetBottom={130}
+      />
+    ) : null;
+  const selectionCard = selected ? <MapSelectionCard rec={selected} detailHref={hrefFor(selected.location.id)} /> : null;
+  const wider = data.widerOption ? <WiderOptionCard option={data.widerOption} onWiden={changeMode} pending={pending} /> : null;
+  const sticky = best ? planTimes(best, now).leave : null;
 
   return (
     <div className="lg:grid lg:h-dvh lg:grid-cols-[minmax(440px,540px)_1fr]">
@@ -77,27 +105,27 @@ export function ResultsView({ data, params }: { data: RecommendationResponse; pa
             <Wordmark />
             <div className="flex items-center gap-2">
               {data.demo && <span className="rounded-full border border-dusk-300/40 px-2.5 py-1 text-xs text-dusk-300">Demo data</span>}
-              <Link href="/" className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm text-ink-muted hover:bg-white/5 hover:text-ink">
+              <Link href="/" className="inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2.5 text-sm text-ink-muted hover:bg-white/5 hover:text-ink">
                 <MapPin aria-hidden className="h-4 w-4" />
-                Change
+                Change<span className="sr-only"> location</span>
               </Link>
             </div>
           </div>
 
-          {outsideCoverage ? (
-            <h1 className="mt-8 text-[1.75rem] leading-tight font-semibold tracking-tight">Outside Iceland</h1>
-          ) : (
-            <>
-              <div className="mt-8">
-                <TonightHeader data={data} />
-              </div>
-              <div className="mt-5">
-                <SegmentedControl label="How far are you willing to drive?" options={MODE_OPTIONS} value={pendingMode ?? data.travelMode} onChange={changeMode} />
-                <p className="sr-only" aria-live="polite">
-                  {pending ? "Updating recommendations…" : ""}
-                </p>
-              </div>
-            </>
+          <div className="mt-7">
+            <VerdictHeader data={data} now={now} onRefresh={() => startRefresh(() => router.refresh())} refreshing={refreshing} />
+          </div>
+
+          {!outsideCoverage && (
+            <div className="mt-5">
+              <p id="drive-label" className="mb-1.5 text-xs text-ink-subtle">
+                How far will you drive?
+              </p>
+              <SegmentedControl label="How far will you drive?" options={MODE_OPTIONS} value={pendingMode ?? data.travelMode} onChange={changeMode} />
+              <p className="sr-only" aria-live="polite">
+                {pending ? "Updating recommendations…" : ""}
+              </p>
+            </div>
           )}
 
           {data.notices.length > 0 && (
@@ -106,8 +134,8 @@ export function ResultsView({ data, params }: { data: RecommendationResponse; pa
             </div>
           )}
 
-          {showMap && (
-            <div className="mt-5 lg:hidden">
+          {map && (
+            <div ref={viewToggleRef} className="mt-5 scroll-mt-3 lg:hidden">
               <SegmentedControl
                 label="Show results as"
                 options={[
@@ -115,24 +143,38 @@ export function ResultsView({ data, params }: { data: RecommendationResponse; pa
                   { value: "map", label: "Map" },
                 ]}
                 value={view}
-                onChange={setView}
+                onChange={(v) => {
+                  setView(v);
+                  if (v === "map") requestAnimationFrame(() => viewToggleRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+                }}
               />
             </div>
           )}
 
-          <div className={`mt-5 transition-opacity ${pending ? "pointer-events-none opacity-50" : ""}`} aria-busy={pending}>
+          <div className={`mt-5 space-y-5 transition-opacity ${pending ? "pointer-events-none opacity-50" : ""}`} aria-busy={pending}>
             {!isDesktop && view === "map" && map ? (
-              <div className="h-[62dvh] overflow-hidden rounded-2xl border border-line">{map}</div>
+              <div className="relative h-[64dvh] overflow-hidden rounded-2xl border border-line">
+                {map}
+                <div className="pointer-events-none absolute inset-x-3 bottom-8">{selectionCard}</div>
+              </div>
             ) : best ? (
               <>
-                <BestCard rec={best} detailHref={hrefFor(best.location.id)} auroraActivity={data.aurora.activity} />
+                {best.label === "Poor" && wider}
+                <BestCard rec={best} detailHref={hrefFor(best.location.id)} auroraActivity={data.aurora.activity} now={now} />
+                {best.label !== "Poor" && wider}
                 <RankedList items={others} hrefFor={hrefFor} selectedId={selectedId} onHighlight={setSelectedId} />
                 <NotRecommendedList items={data.notRecommended} hrefFor={hrefFor} />
+                <AuroraTips />
               </>
-            ) : data.notRecommended.length > 0 ? (
-              <NotRecommendedList items={data.notRecommended} hrefFor={hrefFor} />
             ) : (
-              <EmptyState reason={data.emptyReason ?? "no-candidates"} params={params} travelMode={data.travelMode} />
+              <>
+                {wider}
+                {data.notRecommended.length > 0 ? (
+                  <NotRecommendedList items={data.notRecommended} hrefFor={hrefFor} />
+                ) : (
+                  <EmptyState reason={data.emptyReason ?? "no-candidates"} params={params} travelMode={data.travelMode} />
+                )}
+              </>
             )}
           </div>
 
@@ -141,9 +183,14 @@ export function ResultsView({ data, params }: { data: RecommendationResponse; pa
         </div>
       </div>
 
-      {map && <div className="relative hidden h-dvh border-l border-line lg:block">{isDesktop && map}</div>}
+      {map && (
+        <div className="relative hidden h-dvh border-l border-line lg:block">
+          {isDesktop && map}
+          {isDesktop && <div className="pointer-events-none absolute bottom-8 left-4 w-80">{selectionCard}</div>}
+        </div>
+      )}
 
-      {best && (
+      {best && sticky && (
         <div className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-line bg-night-950/90 px-4 pt-3 backdrop-blur-xl lg:hidden">
           <a
             href={directionsHref(best.location.latitude, best.location.longitude)}
@@ -153,7 +200,10 @@ export function ResultsView({ data, params }: { data: RecommendationResponse; pa
           >
             <span className="min-w-0">
               <span className="block truncate text-sm font-semibold">Directions to {best.location.name}</span>
-              <span className="block text-xs opacity-80">{leaveText(best)}</span>
+              <span className="block text-xs opacity-80">
+                {sticky.label} {sticky.value}
+                {sticky.sub ? ` · ${sticky.sub}` : ""}
+              </span>
             </span>
             <Navigation aria-hidden className="h-5 w-5 shrink-0" />
           </a>

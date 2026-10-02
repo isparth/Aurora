@@ -37,11 +37,13 @@ export type AuroraMapProps = {
   onSelect?: (id: string) => void;
   route?: [number, number][];
   camera?: { lat: number; lon: number; name: string } | null;
+  /** Extra space kept clear at the bottom (e.g. for a card overlaid on the map). */
+  insetBottom?: number;
   className?: string;
 };
 
 /** Score pills are ~60 px wide and anchored at their base, so leave room on every side. */
-const FIT_OPTIONS = { padding: { top: 70, bottom: 40, left: 72, right: 72 }, maxZoom: 10, duration: 0 };
+const fitOptions = (insetBottom: number) => ({ padding: { top: 70, bottom: 40 + insetBottom, left: 72, right: 72 }, maxZoom: 10, duration: 0 });
 
 const MARKER_BASE =
   "flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-semibold tabular shadow-lg backdrop-blur-md transition-transform duration-150 cursor-pointer";
@@ -103,7 +105,7 @@ function cameraElement(name: string): HTMLDivElement {
   return el;
 }
 
-export default function AuroraMap({ origin, destinations, selectedId, onSelect, route, camera, className = "" }: AuroraMapProps) {
+export default function AuroraMap({ origin, destinations, selectedId, onSelect, route, camera, insetBottom = 0, className = "" }: AuroraMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const markersRef = useRef(new Map<string, { marker: Marker; el: HTMLButtonElement }>());
@@ -111,12 +113,14 @@ export default function AuroraMap({ origin, destinations, selectedId, onSelect, 
   const boundsRef = useRef<LngLatBounds | null>(null);
   const userMovedRef = useRef(false);
   const onSelectRef = useRef(onSelect);
+  const insetRef = useRef(insetBottom);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     onSelectRef.current = onSelect;
-  }, [onSelect]);
+    insetRef.current = insetBottom;
+  }, [onSelect, insetBottom]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -143,7 +147,7 @@ export default function AuroraMap({ origin, destinations, selectedId, onSelect, 
       if (!map.hasImage(id)) map.addImage(id, { width: 1, height: 1, data: new Uint8Array(4) });
     });
     const fit = () => {
-      if (boundsRef.current && !userMovedRef.current) map.fitBounds(boundsRef.current, FIT_OPTIONS);
+      if (boundsRef.current && !userMovedRef.current) map.fitBounds(boundsRef.current, fitOptions(insetRef.current));
     };
     map.on("dragstart", () => (userMovedRef.current = true));
     map.on("zoomstart", (e) => {
@@ -209,7 +213,7 @@ export default function AuroraMap({ origin, destinations, selectedId, onSelect, 
     boundsRef.current = bounds;
     userMovedRef.current = false;
     map.resize();
-    map.fitBounds(bounds, FIT_OPTIONS);
+    map.fitBounds(bounds, fitOptions(insetRef.current));
   }, [destinations, origin.lat, origin.lon, origin.label]);
 
   // Selected destination styling.
