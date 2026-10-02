@@ -22,6 +22,7 @@ import type {
   Route,
   TravelMode,
   ViewingLocation,
+  WiderOption,
 } from "@/domain/types";
 import { activityForNight } from "@/features/aurora/imo-provider";
 import { estimateRoute } from "@/features/routing/estimate";
@@ -74,6 +75,10 @@ const ESTIMATE_TOLERANCE = 1.15;
 const CAMERA_RADIUS_KM = 30;
 /** Keeps a slow routing service from holding the whole request (and a serverless function) open. */
 const DEFAULT_ROUTING_BUDGET_MS = 8000;
+/** Spots just beyond the chosen drive time that are checked for a "clearer skies further away" hint. */
+const WIDER_POOL = 12;
+const WIDER_MIN_SCORE = 60;
+const WIDER_MIN_GAIN = 15;
 
 type Settled<T> = { ok: true; value: T } | { ok: false; error: unknown };
 const settle = <T>(p: Promise<T>): Promise<Settled<T>> =>
@@ -192,6 +197,38 @@ async function analyseCamera(
   if (!image) return undefined;
   const version = image.lastModified ?? String(Math.floor(now / (10 * MINUTE)));
   return cached(`vision:${vision.model}:${cam.id}:${version}`, 30 * MINUTE, () => vision.analyze(image, cam, now));
+}
+
+type Candidate = { location: ViewingLocation; point: Coordinates; estimate: Route };
+
+/** Best sky among spots beyond the current drive limit, judged on estimated drive times only (no routing calls). */
+function findWiderOption(
+  pool: Candidate[],
+  weather: (HourlyWeather[] | Error)[],
+  night: Night,
+  auroraActivity: number | null,
+  now: number,
+): WiderOption | null {
+  let best: WiderOption | null = null;
+  for (let i = 0; i < pool.length; i++) {
+    const { location, estimate } = pool[i];
+    const hourly = weather[i];
+    if (!hourly || hourly instanceof Error || hourly.length === 0) continue;
+    if (!location.winterAccessible && isWinterSeason(now)) continue;
+    const evaluations = evaluateSlots({ location, hourly, slots: night.slots, auroraActivity, now });
+    const plan = planVisit(evaluations, now, estimate.durationMinutes);
+    if (plan.windowStart === null || plan.windowEnd === null || plan.viewingScore < WIDER_MIN_SCORE) continue;
+    if (best && plan.viewingScore <= best.viewingScore) continue;
+    best = {
+      travelMode: estimate.durationMinutes <= TRAVEL_MODES.standard.maxMinutes * ESTIMATE_TOLERANCE ? "standard" : "chase",
+      locationId: location.id,
+      name: location.name,
+      viewingScore: plan.viewingScore,
+      estimatedDriveMinutes: estimate.durationMinutes,
+      window: { start: iso(plan.windowStart), end: iso(plan.windowEnd) },
+    };
+  }
+  return best;
 }
 
 /** Forecast cloud for the slot containing `now` — what a camera image taken now should agree with. */
@@ -341,6 +378,7 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
     summary: { headline: tonightHeadline(null), level: null },
     recommendations: [],
     notRecommended: [],
+    widerOption: null,
     notices,
     dataStatus: status,
     ...partial,
@@ -358,20 +396,26 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
   const camerasWarm = providers.cameras?.getAllCameras().catch(() => undefined);
 
   // Phase 1 — cheap geographic filter, no network.
-  const candidates = ctx.locations
+  const all: Candidate[] = ctx.locations
     .map((location) => ({ location, point: pointOf(location), estimate: estimateRoute(origin, pointOf(location)) }))
-    .filter((c) => c.estimate.durationMinutes <= maxMinutes * ESTIMATE_TOLERANCE)
-    .sort((a, b) => a.estimate.distanceKm - b.estimate.distanceKm)
-    .slice(0, MAX_WEATHER_CANDIDATES);
+    .sort((a, b) => a.estimate.distanceKm - b.estimate.distanceKm);
+  const inMode = (c: Candidate, minutes: number) => c.estimate.durationMinutes <= minutes * ESTIMATE_TOLERANCE;
+  const candidates = all.filter((c) => inMode(c, maxMinutes)).slice(0, MAX_WEATHER_CANDIDATES);
+  const widerPool =
+    travelMode === "chase" ? [] : all.filter((c) => !inMode(c, maxMinutes) && inMode(c, TRAVEL_MODES.chase.maxMinutes)).slice(0, WIDER_POOL);
 
   // Phase 2 — weather (batched, cached) and aurora, concurrently.
-  const [auroraResult, weather] = await Promise.all([
+  const points = [...candidates, ...widerPool].map((c) => c.point);
+  const [auroraResult, weatherAll] = await Promise.all([
     auroraPromise,
-    candidates.length > 0 ? fetchWeather(providers.weather, candidates.map((c) => c.point)) : Promise.resolve([]),
+    points.length > 0 ? fetchWeather(providers.weather, points) : Promise.resolve([]),
   ]);
   const aurora = resolveAurora(auroraResult, night.eveningDate, ctx, status, notices, now);
   const nightDto = toNightDto(night);
-  if (candidates.length === 0) return respond({ night: nightDto, aurora, emptyReason: "no-candidates" });
+  const weather = weatherAll.slice(0, candidates.length);
+  const wider = findWiderOption(widerPool, weatherAll.slice(candidates.length), night, aurora.activity, now);
+  const widerThan = (score: number | null) => (wider && (score === null || wider.viewingScore >= score + WIDER_MIN_GAIN) ? wider : null);
+  if (candidates.length === 0) return respond({ night: nightDto, aurora, emptyReason: "no-candidates", widerOption: widerThan(null) });
 
   const scored = candidates.flatMap((c, i) => {
     const hourly = weather[i];
@@ -408,7 +452,7 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
     .sort((a, b) => b.prelim - a.prelim)
     .slice(0, ROUTE_TOP_N);
 
-  if (provisional.length === 0) return respond({ night: nightDto, aurora, emptyReason: "no-window" });
+  if (provisional.length === 0) return respond({ night: nightDto, aurora, emptyReason: "no-window", widerOption: widerThan(null) });
 
   // Phase 4 — route only the strongest candidates.
   const routingDeadline = Date.now() + (ctx.routingBudgetMs ?? DEFAULT_ROUTING_BUDGET_MS);
@@ -500,6 +544,7 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
     summary: { headline: tonightHeadline(top ? top.viewingScore : null), level: top ? scoreLabel(top.viewingScore) : null },
     recommendations,
     notRecommended,
+    widerOption: widerThan(top ? top.viewingScore : null),
     emptyReason: final.length > 0 ? undefined : withinTravelLimit === 0 ? "no-candidates" : "no-window",
   });
 }

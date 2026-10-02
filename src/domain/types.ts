@@ -252,6 +252,17 @@ export type EmptyReason = "outside-coverage" | "no-candidates" | "no-darkness" |
 
 export type Origin = Coordinates & { label: string };
 
+/** A much better sky just beyond the chosen drive time — offered as a one-tap way to search further. */
+export type WiderOption = {
+  travelMode: TravelMode;
+  locationId: string;
+  name: string;
+  viewingScore: number;
+  /** Distance-based estimate; the real route and roads are checked once the user widens the search. */
+  estimatedDriveMinutes: number;
+  window: { start: string; end: string };
+};
+
 export type RecommendationResponse = {
   generatedAt: string;
   now: string;
@@ -264,6 +275,7 @@ export type RecommendationResponse = {
   summary: { headline: string; level: ScoreLabel | null };
   recommendations: Recommendation[];
   notRecommended: Recommendation[];
+  widerOption: WiderOption | null;
   emptyReason?: EmptyReason;
   notices: string[];
   dataStatus: DataStatus;

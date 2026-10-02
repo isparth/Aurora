@@ -26,6 +26,8 @@ const place = (id: string, lat: number, lon: number): ViewingLocation => ({
 
 const A = place("brief-clearing", 64.2554, -21.128);
 const B = place("steady", 63.9299, -21.9947);
+/** About 2 hours from Reykjavík by estimate: outside "standard", inside "chase". */
+const FAR = place("far-clear", 63.7533, -20.2242);
 
 /** Hourly weather from 18:00 for 16 hours, cloud cover chosen per hour (Iceland time = UTC). */
 function weather(cloudAt: (hourOfDay: number) => number): HourlyWeather[] {
@@ -47,7 +49,7 @@ const clearAllNight = weather(() => 0.05);
 const keyOf = (p: Coordinates) => `${p.lat.toFixed(3)},${p.lon.toFixed(3)}`;
 const byLocation = <T,>(map: Record<string, T>) => {
   const lookup = new Map(Object.entries(map).map(([id, v]) => {
-    const l = [A, B].find((x) => x.id === id)!;
+    const l = [A, B, FAR].find((x) => x.id === id)!;
     return [keyOf({ lat: l.latitude, lon: l.longitude }), v] as const;
   }));
   return (p: Coordinates) => lookup.get(keyOf(p));
@@ -58,6 +60,7 @@ function context(opts: {
   drive: Record<string, number>;
   roads?: Record<string, RoadStatus>;
   overrides?: Partial<EngineProviders>;
+  locations?: ViewingLocation[];
 }): EngineContext {
   const weatherFor = byLocation(opts.weather);
   const driveFor = byLocation(opts.drive);
@@ -88,10 +91,36 @@ function context(opts: {
       vision: null,
       ...opts.overrides,
     },
-    locations: [A, B],
+    locations: opts.locations ?? [A, B],
     demo: false,
   };
 }
+
+describe("recommend — clearer skies further away", () => {
+  const ctx = (farWeather: HourlyWeather[]) =>
+    context({
+      weather: { [A.id]: weather(() => 0.9), [B.id]: weather(() => 0.85), [FAR.id]: farWeather },
+      drive: { [A.id]: 45, [B.id]: 40 },
+      locations: [A, B, FAR],
+    });
+
+  it("points to a much clearer spot just beyond the chosen drive time", async () => {
+    const res = await recommend({ origin: REYKJAVIK, travelMode: "standard", now: NOW }, ctx(clearAllNight));
+    expect(ids(res.recommendations)).not.toContain(FAR.id);
+    expect(res.widerOption).toMatchObject({ locationId: FAR.id, travelMode: "chase" });
+    expect(res.widerOption!.viewingScore).toBeGreaterThanOrEqual(res.recommendations[0].viewingScore + 15);
+  });
+
+  it("stays quiet when the extra drive wouldn't buy a clearly better sky", async () => {
+    const res = await recommend({ origin: REYKJAVIK, travelMode: "standard", now: NOW }, ctx(weather(() => 0.9)));
+    expect(res.widerOption).toBeNull();
+  });
+
+  it("never suggests going further when already searching the widest radius", async () => {
+    const res = await recommend({ origin: REYKJAVIK, travelMode: "chase", now: NOW }, ctx(clearAllNight));
+    expect(res.widerOption).toBeNull();
+  });
+});
 
 const run = (ctx: EngineContext) => recommend({ origin: REYKJAVIK, travelMode: "chase", now: NOW }, ctx);
 const ids = (recs: { location: { id: string } }[]) => recs.map((r) => r.location.id);
