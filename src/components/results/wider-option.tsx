@@ -3,8 +3,10 @@ import { ArrowRight, Telescope } from "lucide-react";
 import { buttonClass } from "@/components/ui/button";
 import type { TravelMode, WiderOption } from "@/domain/types";
 import { TRAVEL_MODES } from "@/features/recommendations/travel-modes";
-import { scoreLabel } from "@/lib/scoring/labels";
+import { sceneryLabel, scoreLabel } from "@/lib/scoring/labels";
 import { formatDuration, formatRange } from "@/lib/time";
+
+const SETTING_TEXT = { "Iconic spot": ", an iconic spot,", "Scenic spot": ", a scenic spot,", none: "" } as const;
 
 /** "It's cloudy here, but much clearer a bit further away" — one tap widens the search. */
 export function WiderOptionCard({ option, onWiden, pending }: { option: WiderOption; onWiden: (mode: TravelMode) => void; pending: boolean }) {
@@ -15,7 +17,8 @@ export function WiderOptionCard({ option, onWiden, pending }: { option: WiderOpt
         Clearer skies further away
       </h2>
       <p className="mt-2 text-[15px] leading-relaxed text-ink">
-        <span className="font-semibold">{option.name}</span> could reach{" "}
+        <span className="font-semibold">{option.name}</span>
+        {SETTING_TEXT[sceneryLabel(option.scenery) ?? "none"]} could reach{" "}
         <span className="tabular font-semibold">{option.viewingScore}</span> ({scoreLabel(option.viewingScore).toLowerCase()}),{" "}
         <span className="tabular">{formatRange(option.window.start, option.window.end)}</span> — about{" "}
         <span className="tabular">{formatDuration(option.estimatedDriveMinutes)}</span> away.

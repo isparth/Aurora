@@ -12,6 +12,7 @@ import { SiteFooter } from "@/components/site-footer";
 import { buttonClass } from "@/components/ui/button";
 import { ConfidenceChip } from "@/components/ui/confidence";
 import { ConfidenceTip, ViewingScoreTip } from "@/components/ui/glossary";
+import { SceneryBadge } from "@/components/ui/scenery-badge";
 import { styleFor } from "@/components/ui/score";
 import { ShareButton } from "@/components/ui/share-button";
 import type { LocationDetail, ViewingLocation } from "@/domain/types";
@@ -79,7 +80,10 @@ export function DetailView({ detail, location, params }: { detail: LocationDetai
 
       <header className="mt-7 grid gap-5 lg:grid-cols-[1fr_auto] lg:items-end">
         <div>
-          <p className="text-sm text-ink-subtle">{location.region}</p>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <p className="text-sm text-ink-subtle">{location.region}</p>
+            <SceneryBadge scenery={location.scenery} />
+          </div>
           <h1 className="mt-1 text-[2rem] leading-tight font-semibold tracking-tight text-balance sm:text-4xl">{location.name}</h1>
           {rec && rec.bestWindow ? (
             <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -184,6 +188,9 @@ export function DetailView({ detail, location, params }: { detail: LocationDetai
               About this spot
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-ink-muted">{location.description}</p>
+            <p className="mt-2 text-sm leading-relaxed text-ink-muted">
+              <span className="font-medium text-ink">Setting:</span> {location.highlight}.
+            </p>
             {location.notes && <p className="mt-2 text-sm leading-relaxed text-warn">{location.notes}</p>}
             <Access location={location} />
           </section>

@@ -44,6 +44,13 @@ export function lightPollutionLabel(score: number): string {
   return "High";
 }
 
+/** Only notable settings get a label; plainer spots aren't called out as such. */
+export function sceneryLabel(scenery: number): "Iconic spot" | "Scenic spot" | null {
+  if (scenery >= 0.85) return "Iconic spot";
+  if (scenery >= 0.65) return "Scenic spot";
+  return null;
+}
+
 export function darknessQualityLabel(darkness: number): string {
   if (darkness >= 0.9) return "Excellent";
   if (darkness >= 0.7) return "Good";

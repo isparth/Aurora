@@ -4,6 +4,7 @@ import Link from "next/link";
 import { buttonClass } from "@/components/ui/button";
 import { ConfidenceChip } from "@/components/ui/confidence";
 import { ConfidenceTip, ViewingScoreTip } from "@/components/ui/glossary";
+import { SceneryBadge } from "@/components/ui/scenery-badge";
 import { LABEL_STYLE } from "@/components/ui/score";
 import { ShareButton } from "@/components/ui/share-button";
 import type { Recommendation } from "@/domain/types";
@@ -64,7 +65,10 @@ export function BestCard({ rec, detailHref, auroraActivity, now }: { rec: Recomm
           <h2 id="best-title" className="mt-2 text-[1.6rem] leading-tight font-semibold tracking-tight text-balance">
             {rec.location.name}
           </h2>
-          <p className="mt-0.5 text-sm text-ink-subtle">{rec.location.region}</p>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <p className="text-sm text-ink-subtle">{rec.location.region}</p>
+            <SceneryBadge scenery={rec.location.scenery} />
+          </div>
         </div>
         <ScoreRing score={rec.viewingScore} />
       </div>

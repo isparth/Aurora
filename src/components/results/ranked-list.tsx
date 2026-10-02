@@ -1,6 +1,7 @@
 import { ChevronRight, OctagonAlert, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 
+import { SceneryBadge } from "@/components/ui/scenery-badge";
 import { ScoreBadge } from "@/components/ui/score";
 import type { Recommendation } from "@/domain/types";
 import { driveText, pct, windowText } from "@/lib/format";
@@ -24,6 +25,7 @@ export function RankedList({
       <h2 id="others-title" className="text-sm font-semibold text-ink">
         Other options
       </h2>
+      <p className="mt-0.5 text-xs text-ink-subtle">Ranked by sky, drive time, roads and scenery.</p>
       <ol className="mt-2 divide-y divide-line border-y border-line">
         {items.map((r) => (
           <li key={r.location.id}>
@@ -37,7 +39,10 @@ export function RankedList({
             >
               <span className="tabular w-5 shrink-0 text-sm text-ink-subtle">{r.rank}</span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium text-ink">{r.location.name}</span>
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="truncate font-medium text-ink">{r.location.name}</span>
+                  <SceneryBadge scenery={r.location.scenery} compact />
+                </span>
                 <span className="tabular block text-sm text-ink-muted">
                   {driveText(r.travel).replace(" drive", "")} · {r.conditions ? `${pct(r.conditions.clouds.total)} clouds` : "no forecast"}
                 </span>

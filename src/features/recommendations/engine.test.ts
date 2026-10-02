@@ -10,7 +10,7 @@ const REYKJAVIK = { lat: 64.1466, lon: -21.9426, label: "Reykjavík" };
 /** 19:30 Iceland time; the night (sun below −6°) begins at 20:00. */
 const NOW = Date.UTC(2026, 9, 2, 19, 30);
 
-const place = (id: string, lat: number, lon: number): ViewingLocation => ({
+const place = (id: string, lat: number, lon: number, scenery = 0.5): ViewingLocation => ({
   id,
   name: id,
   description: "",
@@ -18,6 +18,8 @@ const place = (id: string, lat: number, lon: number): ViewingLocation => ({
   longitude: lon,
   region: "Golden Circle",
   lightPollutionScore: 0.9,
+  scenery,
+  highlight: `${id} highlight`,
   normalCarAccessible: true,
   winterAccessible: true,
   parkingAvailable: true,
@@ -95,6 +97,25 @@ function context(opts: {
     demo: false,
   };
 }
+
+describe("recommend — scenery", () => {
+  // The iconic spot is deliberately the farther one, so only its setting can put it first.
+  const plain = place("plain-lakeshore", 63.9299, -21.9947, 0.4);
+  const iconic = place("iconic-waterfall", 64.2554, -21.128, 1);
+  const ctx = context({
+    weather: { [A.id]: clearAllNight, [B.id]: clearAllNight },
+    drive: { [A.id]: 30, [B.id]: 30 },
+    locations: [iconic, plain],
+  });
+
+  it("ranks the more spectacular spot first when the sky is the same, without inflating its sky score", async () => {
+    const res = await run(ctx);
+    expect(ids(res.recommendations)).toEqual([iconic.id, plain.id]);
+    const [first, second] = res.recommendations;
+    expect(first.viewingScore).toBe(second.viewingScore);
+    expect(first.reasons).toContain(`Iconic setting: ${iconic.highlight}.`);
+  });
+});
 
 describe("recommend — clearer skies further away", () => {
   const ctx = (farWeather: HourlyWeather[]) =>

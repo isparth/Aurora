@@ -223,6 +223,7 @@ function findWiderOption(
       travelMode: estimate.durationMinutes <= TRAVEL_MODES.standard.maxMinutes * ESTIMATE_TOLERANCE ? "standard" : "chase",
       locationId: location.id,
       name: location.name,
+      scenery: location.scenery,
       viewingScore: plan.viewingScore,
       estimatedDriveMinutes: estimate.durationMinutes,
       window: { start: iso(plan.windowStart), end: iso(plan.windowEnd) },
@@ -263,6 +264,7 @@ export function buildRecommendation(args: {
     driveMinutes: travel.durationMinutes,
     roadStatus: road.status,
     winterAccessConcern,
+    scenery: location.scenery,
   });
 
   let reasons: string[] = [];
@@ -445,6 +447,7 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
         driveMinutes: s.estimate.durationMinutes,
         roadStatus: "unknown",
         winterAccessConcern: !s.location.winterAccessible && isWinterSeason(now),
+        scenery: s.location.scenery,
       }).score;
       return { s, plan, prelim };
     })

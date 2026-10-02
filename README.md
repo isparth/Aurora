@@ -93,10 +93,17 @@ whole night, ignoring travel. When the night peaks before you could arrive, the 
 - **Leave around** = window start − drive − buffer (10 min or 15% of the drive), rounded down to 5 minutes;
   "Leave now" when that is already past.
 
-### 3. Recommendation score — "is it sensible to go?"
+### 3. Recommendation score — "is it sensible, and worth it, to go?"
 
 Kept separate so a distant spot's sky is never misreported:
-`viewing score + up to 6 for a long window − 6 per hour of driving − road penalty (unknown 2, caution 6) − winter-access penalty`.
+`viewing score + up to 6 for a long window − 6 per hour of driving − road penalty (unknown 2, caution 6) − winter-access penalty + scenery (−5 … +5)`.
+
+**Scenery.** Seeing the aurora above Kirkjufell or icebergs at Jökulsárlón is a different experience from a lay-by, so
+every spot carries an editorial `scenery` rating (0–1: landmark or foreground, water reflections, open view) and a one-line
+`highlight`. The bonus is centred on 0.5 with a spread of 10 points (`SCENERY_WEIGHT`): an iconic spot (1.0) versus a plain
+lakeshore (0.4) is worth about 6 points — roughly an hour of extra driving. So a famous backdrop wins between similar
+skies but never beats a clearly better sky, never changes the sky's viewing score, and never overrides a road warning.
+Spots rated 0.85+ are labelled **Iconic spot**, 0.65+ **Scenic spot**; plainer spots get no label.
 
 **Safety is a hard constraint:** a *closed* or *difficult* road (IRCA: impassable, closed, very difficult, mountain
 vehicles only, blizzard, storm…) makes a spot **Not recommended** whatever its sky score, and the next safe option is

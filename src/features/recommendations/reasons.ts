@@ -37,6 +37,9 @@ export function buildReasons(ctx: ReasonContext): { reasons: string[]; warnings:
   else if (clouds.effective <= 0.6) reasons.push(`Partly cloudy (${pct(clouds.total)}%) around ${at}, so gaps in the cloud are likely.`);
   else warnings.push(`Heavy cloud (${pct(clouds.total)}%) is forecast even at the best time.`);
 
+  if (location.scenery >= 0.85) reasons.push(`Iconic setting: ${location.highlight}.`);
+  else if (location.scenery >= 0.65) reasons.push(`Scenic setting: ${location.highlight}.`);
+
   const minutes = (ctx.windowEnd - ctx.windowStart) / 60_000;
   if (minutes >= 60) reasons.push(`Favourable conditions last for roughly ${formatApproxDuration(minutes)}.`);
   else warnings.push(`Only a short favourable window (${formatTime(ctx.windowStart)}–${formatTime(ctx.windowEnd)}).`);

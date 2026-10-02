@@ -19,6 +19,14 @@ export type ViewingLocation = {
   region: Region;
   /** 0 = strong urban light pollution, 1 = extremely dark. Manually assigned estimate. */
   lightPollutionScore: number;
+  /**
+   * Editorial rating of the setting for watching and photographing the aurora: landmark or
+   * foreground, water reflections, open view. 1 = iconic aurora backdrop, ~0.4 = pleasant but plain.
+   * Affects the recommendation score only — never the sky's viewing score.
+   */
+  scenery: number;
+  /** One line on what makes the place special, e.g. "Icebergs in a glacier lagoon". */
+  highlight: string;
   normalCarAccessible: boolean;
   winterAccessible: boolean;
   parkingAvailable: boolean;
@@ -257,6 +265,7 @@ export type WiderOption = {
   travelMode: TravelMode;
   locationId: string;
   name: string;
+  scenery: number;
   viewingScore: number;
   /** Distance-based estimate; the real route and roads are checked once the user widens the search. */
   estimatedDriveMinutes: number;

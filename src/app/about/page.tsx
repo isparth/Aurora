@@ -76,6 +76,10 @@ export default function AboutPage() {
             <li>The best window is the longest steady stretch close to the night&apos;s reachable peak, not a single timestamp.</li>
             <li>Leave-by time = window start − drive − a buffer (10 minutes or 15% of the drive).</li>
             <li>Longer drives and icy or unverified roads lower the recommendation, but never the sky score itself.</li>
+            <li>
+              The setting counts too: an iconic backdrop like Kirkjufell, Jökulsárlón or Vestrahorn is worth roughly an extra hour of
+              driving over a plain lakeshore. It decides between similar skies, but never beats a clearly better sky.
+            </li>
             <li>Closed or difficult roads are a hard stop: the next safe alternative is recommended instead.</li>
           </ul>
         </section>
