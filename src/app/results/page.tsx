@@ -5,14 +5,15 @@ import { SkyBackground } from "@/components/brand/sky-background";
 import { ResultsView } from "@/components/results/results-view";
 import { buttonClass } from "@/components/ui/button";
 import { parseRecommendationQuery } from "@/features/recommendations/query";
-import { getRecommendations } from "@/features/recommendations/service";
+import { getRecommendations, resolveOrigin } from "@/features/recommendations/service";
 
 type Props = { searchParams: Promise<Record<string, string | string[] | undefined>> };
 
 export async function generateMetadata({ searchParams }: Props): Promise<Metadata> {
   const query = parseRecommendationQuery(await searchParams);
-  const label = query.ok ? query.value.label : undefined;
-  return { title: label ? `Tonight near ${label}` : "Tonight's best aurora spots" };
+  if (!query.ok) return { title: "Tonight's best aurora spots" };
+  const { label } = resolveOrigin(query.value.lat, query.value.lon, query.value.label);
+  return { title: `Tonight near ${label}` };
 }
 
 export default async function ResultsPage({ searchParams }: Props) {
