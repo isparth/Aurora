@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 
-import { errorResponse, parseDetailQuery } from "@/features/recommendations/query";
+import { cdnCache, errorResponse, parseDetailQuery } from "@/features/recommendations/query";
 import { getLocationDetail } from "@/features/recommendations/service";
 
 /** One destination evaluated across the night; lat/lon are optional (travel is ignored without them). */
@@ -12,7 +12,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   try {
     const detail = await getLocationDetail({ id, ...query.value });
     if (!detail) return errorResponse("NOT_FOUND", "No viewing location with that id.", 404);
-    return Response.json(detail);
+    return Response.json(detail, { headers: cdnCache(60) });
   } catch (error) {
     console.error("location detail failed", error);
     return errorResponse("INTERNAL_ERROR", "Could not evaluate this location.", 500);

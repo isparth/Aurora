@@ -69,6 +69,11 @@ export function parseDetailQuery(
   return hasOrigin ? { ok: true, value: { ...parsed.value, demo } } : { ok: true, value: { travelMode: parsed.value.travelMode, demo } };
 }
 
+/** Shared-cache (CDN) headers for public, non-personal API responses. */
+export const cdnCache = (seconds: number, staleSeconds = seconds * 4) => ({
+  "Cache-Control": `public, s-maxage=${seconds}, stale-while-revalidate=${staleSeconds}`,
+});
+
 export function errorResponse(code: string, message: string, status: number): Response {
   return Response.json({ error: { code, message } }, { status });
 }

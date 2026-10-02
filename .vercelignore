@@ -1,0 +1,12 @@
+# Never upload local secrets (Vercel already skips .env.local / .env.*.local; this also covers .env and .env.production)
+.env
+.env.*
+!.env.example
+
+# Local tooling artefacts
+.playwright-mcp
+coverage
+*.tsbuildinfo
+
+# Regenerated during the build by scripts/copy-maplibre-worker.mjs
+public/maplibre

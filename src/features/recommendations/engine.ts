@@ -54,6 +54,8 @@ export type EngineContext = {
   providers: EngineProviders;
   locations: ViewingLocation[];
   demo: boolean;
+  /** Total time allowed for routing the shortlist; routes not started in time use estimates. */
+  routingBudgetMs?: number;
 };
 
 export type RecommendRequest = { origin: Origin; travelMode: TravelMode; now: number };
@@ -70,6 +72,8 @@ const COVERAGE_KM = 250;
 /** Estimated drive times are conservative, so allow some slack when filtering on them. */
 const ESTIMATE_TOLERANCE = 1.15;
 const CAMERA_RADIUS_KM = 30;
+/** Keeps a slow routing service from holding the whole request (and a serverless function) open. */
+const DEFAULT_ROUTING_BUDGET_MS = 8000;
 
 type Settled<T> = { ok: true; value: T } | { ok: false; error: unknown };
 const settle = <T>(p: Promise<T>): Promise<Settled<T>> =>
@@ -407,8 +411,9 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
   if (provisional.length === 0) return respond({ night: nightDto, aurora, emptyReason: "no-window" });
 
   // Phase 4 — route only the strongest candidates.
+  const routingDeadline = Date.now() + (ctx.routingBudgetMs ?? DEFAULT_ROUTING_BUDGET_MS);
   const routeResults = await mapWithConcurrency(provisional, providers.routing.maxConcurrency ?? 3, (p) =>
-    providers.routing.route(origin, p.s.point),
+    Date.now() > routingDeadline ? Promise.reject(new Error("routing time budget exceeded")) : providers.routing.route(origin, p.s.point),
   );
   const travels: Route[] = routeResults.map((r, i) => (r.status === "fulfilled" ? r.value : provisional[i].s.estimate));
   const routeFailures = routeResults.filter((r) => r.status === "rejected").length;

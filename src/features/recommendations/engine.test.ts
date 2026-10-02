@@ -239,6 +239,21 @@ describe("recommend — provider failures degrade gracefully", () => {
     expect(res.dataStatus.routing.state).toBe("unavailable");
   });
 
+  it("stops waiting for a slow routing service and estimates the remaining drives", async () => {
+    const slowRouting: RoutingProvider = {
+      name: "osrm",
+      maxConcurrency: 1,
+      route: async () => {
+        await new Promise((r) => setTimeout(r, 30));
+        return { durationMinutes: 30, distanceKm: 40, source: "osrm", estimated: false };
+      },
+    };
+    const ctx = { ...context({ weather: { [A.id]: clearAllNight, [B.id]: steadyPartlyClear }, drive: {}, overrides: { routing: slowRouting } }), routingBudgetMs: 20 };
+    const res = await run(ctx);
+    expect(res.recommendations.map((r) => r.travel.estimated).sort()).toEqual([false, true]);
+    expect(res.dataStatus.routing.state).toBe("degraded");
+  });
+
   it("reports an empty state instead of crashing when every forecast fails", async () => {
     const res = await run(context({ weather: { [A.id]: new Error("x"), [B.id]: new Error("y") }, drive: {} }));
     expect(res.recommendations).toEqual([]);

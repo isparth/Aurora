@@ -198,6 +198,34 @@ All optional — see [`.env.example`](.env.example).
 | `OPEN_METEO_BASE_URL`, `PHOTON_BASE_URL` | Override public endpoints |
 | `NEXT_PUBLIC_MAP_STYLE_URL` | MapLibre style URL (default OpenFreeMap dark) |
 
+## Deploying (free)
+
+The app is designed to run on [Vercel's Hobby plan](https://vercel.com/docs/plans/hobby), which is free for personal,
+non-commercial use and cannot bill you — if a monthly allowance (1M function invocations, 100 GB transfer, 4 CPU-hours)
+is exceeded, the project is paused rather than charged. No API keys are needed.
+
+```bash
+npm i -g vercel        # or use npx vercel
+vercel login           # once, in your own terminal
+vercel deploy --prod   # builds on Vercel and prints the public URL
+```
+
+What keeps a public deployment safe and inside the free tier:
+
+- **No paid services by default.** Every data source used without keys is free; nothing in the default setup can create a bill.
+- **Per-IP rate limits** (`src/proxy.ts`): 60 API calls, 40 result pages, 90 searches and 120 camera images per minute per IP.
+- **Upstream request budgets** for routing and search, a failure backoff, and caching, so a flood of unique requests can't
+  hammer the free public services this app depends on.
+- **CDN caching** of public API responses (`s-maxage`), so repeat requests don't run functions at all.
+- **Bounded work per request:** routing stops after 8 seconds and the remaining drives are estimated; every upstream call has a timeout.
+- **Security headers:** Content-Security-Policy, HSTS, `X-Frame-Options: DENY`, `nosniff`, a strict referrer policy and a
+  permissions policy that only allows geolocation. Camera images are proxied only from IRCA over HTTPS.
+- **Secrets stay out of the bundle:** `.env*` files are never committed or uploaded (`.gitignore`, `.vercelignore`); keys
+  are read server-side only.
+
+If you later add `MAPBOX_TOKEN` or `VISION_API_KEY`, set them in the Vercel project's *Settings → Environment
+Variables* (never in the repo) and set a spending limit in the Mapbox / OpenAI dashboards as well.
+
 ## Testing
 
 ```bash

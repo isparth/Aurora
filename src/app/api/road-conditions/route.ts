@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
-import { errorResponse } from "@/features/recommendations/query";
+import { cdnCache, errorResponse } from "@/features/recommendations/query";
 import { loadRoadNetwork } from "@/features/roads/irca-provider";
 import { describeError } from "@/lib/http";
 
@@ -32,12 +32,15 @@ export async function GET(request: NextRequest) {
         ...(geometry === "true" ? { lines: lines.map((l) => l.map((p) => [p.lon, p.lat])) } : {}),
       }));
     const counts = network.segments.reduce<Record<string, number>>((acc, s) => ({ ...acc, [s.status]: (acc[s.status] ?? 0) + 1 }), {});
-    return Response.json({
-      fetchedAt: network.fetchedAt,
-      counts,
-      segments,
-      attribution: "Icelandic Road and Coastal Administration — road-condition data service (færð), CC BY 4.0",
-    });
+    return Response.json(
+      {
+        fetchedAt: network.fetchedAt,
+        counts,
+        segments,
+        attribution: "Icelandic Road and Coastal Administration — road-condition data service (færð), CC BY 4.0",
+      },
+      { headers: cdnCache(120) },
+    );
   } catch (error) {
     return errorResponse("UPSTREAM_UNAVAILABLE", `Road conditions unavailable — check umferdin.is (${describeError(error)}).`, 503);
   }
