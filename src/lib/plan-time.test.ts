@@ -50,13 +50,15 @@ describe("verdict", () => {
 
   it("answers the question first, then gives the plan", () => {
     expect(verdict(response(89), at("19:40"))).toEqual({
-      headline: "Great conditions tonight",
-      summary: "Clearest at Þingvellir from 21:30 to 01:30. Leave at 20:35 (in 55 min).",
+      headline: "Very good chance tonight",
+      summary: "Best chance (90%) at Þingvellir from 21:30 to 01:30. Leave at 20:35 (in 55 min).",
     });
   });
 
-  it("is honest when it's cloudy everywhere", () => {
-    expect(verdict(response(30), at("19:40")).summary).toMatch(/^Mostly cloudy nearby\. Best bet: Þingvellir/);
+  it("is honest about a long shot, and says what holds it back", () => {
+    expect(verdict(response(10, { limitingFactor: "clouds" }), at("19:40")).summary).toMatch(/^Mostly cloudy nearby\. Best bet: Þingvellir/);
+    expect(verdict(response(10, { limitingFactor: "activity" }), at("19:40")).summary).toMatch(/^Aurora activity is low tonight\. Best bet/);
+    expect(verdict(response(10), at("19:40")).headline).toBe("Aurora unlikely tonight");
   });
 
   it("doesn't keep repeating a plan whose window has ended", () => {
@@ -66,7 +68,13 @@ describe("verdict", () => {
   it("explains empty results and blocked roads", () => {
     const empty = { recommendations: [], notRecommended: [], emptyReason: "no-darkness" } as unknown as RecommendationResponse;
     expect(verdict(empty, at("19:40")).headline).toBe("Too bright for aurora tonight");
-    const blocked = { recommendations: [], notRecommended: [{}] } as unknown as RecommendationResponse;
-    expect(verdict(blocked, at("19:40")).headline).toBe("Unsafe roads to the clear spots");
+    const blocked = { recommendations: [], notRecommended: [{ blockedBy: "road" }] } as unknown as RecommendationResponse;
+    expect(verdict(blocked, at("19:40")).headline).toBe("Unsafe roads to the best spots");
+    const windy = { recommendations: [], notRecommended: [{ blockedBy: "wind" }] } as unknown as RecommendationResponse;
+    expect(verdict(windy, at("19:40")).headline).toBe("Storm-force wind at the best spots");
+    const both = { recommendations: [], notRecommended: [{ blockedBy: "wind" }, { blockedBy: "road" }] } as unknown as RecommendationResponse;
+    expect(verdict(both, at("19:40")).summary).toMatch(/dangerous wind or closed roads/);
+    const hopeless = { recommendations: [], notRecommended: [], emptyReason: "no-chance", limitingFactor: "activity" } as unknown as RecommendationResponse;
+    expect(verdict(hopeless, at("19:40"))).toEqual({ headline: "Aurora unlikely tonight", summary: "Aurora activity is low tonight at every spot within reach." });
   });
 });

@@ -18,7 +18,8 @@ const STATE_DOT: Record<SourceState, string> = {
 };
 
 const SOURCES: { key: keyof DataStatus; name: string; provider: string }[] = [
-  { key: "aurora", name: "Aurora activity", provider: "Icelandic Meteorological Office (vedur.is)" },
+  { key: "spaceWeather", name: "Geomagnetic activity", provider: "NOAA Space Weather Prediction Center — Kp forecast and real-time estimate" },
+  { key: "aurora", name: "Aurora forecast", provider: "Icelandic Meteorological Office (vedur.is) — Kp at midnight" },
   { key: "weather", name: "Cloud & weather", provider: "Open-Meteo" },
   { key: "routing", name: "Drive times", provider: "OSRM / Mapbox, with distance-based fallback" },
   { key: "roads", name: "Road conditions", provider: "IRCA (Vegagerðin) road-condition data service, CC BY 4.0" },

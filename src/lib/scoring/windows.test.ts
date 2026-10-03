@@ -1,40 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { computeDeparture, earliestViewingTime, findBestWindow, isReachable, SLOT_MS, type ScoredSlot } from "./windows";
+import { computeDeparture, earliestViewingTime, isReachable, SLOT_MS } from "./windows";
 
 const T0 = Date.UTC(2026, 9, 2, 20, 0);
-const slots = (scores: number[], reachableFrom = 0): ScoredSlot[] =>
-  scores.map((score, i) => ({ time: T0 + i * SLOT_MS, score, reachable: i >= reachableFrom }));
-
-describe("findBestWindow", () => {
-  it("finds the contiguous period around the peak rather than a single timestamp", () => {
-    const w = findBestWindow(slots([52, 68, 80, 90, 94, 91, 78, 62]));
-    expect(w).toMatchObject({ startIndex: 3, endIndex: 5, peakIndex: 4, peakScore: 94 });
-  });
-
-  it("prefers a long steady window over a brief spike", () => {
-    const w = findBestWindow(slots([95, 40, 40, 88, 89, 90, 88, 87]));
-    expect(w?.startIndex).toBe(3);
-    expect(w?.endIndex).toBe(7);
-  });
-
-  it("only uses slots the user can reach", () => {
-    const w = findBestWindow(slots([95, 96, 60, 70, 72, 65], 2));
-    expect(w?.startIndex).toBe(3);
-    expect(w?.peakScore).toBe(72);
-  });
-
-  it("never bridges a gap in the data", () => {
-    const withGap = slots([90, 91, 92]).map((s, i) => (i === 2 ? { ...s, time: s.time + 2 * SLOT_MS } : s));
-    const w = findBestWindow(withGap);
-    expect(w?.endIndex).toBe(1);
-  });
-
-  it("returns null when nothing is reachable or everything scores zero", () => {
-    expect(findBestWindow(slots([80, 90], 5))).toBeNull();
-    expect(findBestWindow(slots([0, 0, 0]))).toBeNull();
-  });
-});
 
 describe("reachability", () => {
   it("counts a slot as reachable only if you arrive by its midpoint", () => {

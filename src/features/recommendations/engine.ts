@@ -3,10 +3,14 @@ import type {
   CameraProvider,
   RoadConditionProvider,
   RoutingProvider,
+  SpaceWeatherProvider,
   VisionProvider,
   WeatherProvider,
 } from "@/domain/providers";
 import type {
+  ActivitySource,
+  AuroraForecast,
+  AuroraOutlook,
   CameraObservation,
   Coordinates,
   DataStatus,
@@ -20,6 +24,8 @@ import type {
   RecommendationResponse,
   RoadSafety,
   Route,
+  ScoreComponents,
+  SpaceWeather,
   TravelMode,
   ViewingLocation,
   WiderOption,
@@ -31,19 +37,23 @@ import { cached } from "@/lib/cache";
 import { mapWithConcurrency } from "@/lib/concurrency";
 import { haversineKm, thinLine } from "@/lib/geo";
 import { describeError, logProviderError } from "@/lib/http";
+import { activityAt, NOWCAST_MAX_AGE_MS, SCENARIO_WEIGHTS, type ActivityInputs } from "@/lib/scoring/activity";
+import { limitingFactor } from "@/lib/scoring/aurora-visibility";
 import { scoreLabel, tonightHeadline } from "@/lib/scoring/labels";
-import { computeRecommendationScore } from "@/lib/scoring/recommendation-score";
+import { BLOCKING_ROAD_STATUSES, computeRecommendationScore } from "@/lib/scoring/recommendation-score";
 import { SLOT_MS } from "@/lib/scoring/windows";
 import { formatTime, HOUR, isWinterSeason, MINUTE } from "@/lib/time";
 
 import { computeConfidence } from "./confidence";
 import { computeNight, type Night } from "./night";
 import { buildReasons } from "./reasons";
-import { evaluateSlots, planVisit, type SlotEvaluation, type VisitPlan } from "./timeline";
+import { evaluateSlots, planVisit, windowGustKph, type SlotEvaluation, type VisitPlan } from "./timeline";
 import { TRAVEL_MODES } from "./travel-modes";
 
 export type EngineProviders = {
   aurora: AuroraProvider;
+  /** NOAA Kp forecast and real-time estimate; without it activity falls back to IMO, then to a typical night. */
+  spaceWeather: SpaceWeatherProvider | null;
   weather: WeatherProvider;
   routing: RoutingProvider;
   roads: RoadConditionProvider;
@@ -75,9 +85,10 @@ const ESTIMATE_TOLERANCE = 1.15;
 const CAMERA_RADIUS_KM = 30;
 /** Keeps a slow routing service from holding the whole request (and a serverless function) open. */
 const DEFAULT_ROUTING_BUDGET_MS = 8000;
-/** Spots just beyond the chosen drive time that are checked for a "clearer skies further away" hint. */
+/** Spots just beyond the chosen drive time that are checked for a "better chance further away" hint. */
 const WIDER_POOL = 12;
-const WIDER_MIN_SCORE = 60;
+/** A wider option is offered only for a fair chance that beats the best nearby option by 15 points. */
+const WIDER_MIN_CHANCE = 35;
 const WIDER_MIN_GAIN = 15;
 
 type Settled<T> = { ok: true; value: T } | { ok: false; error: unknown };
@@ -88,8 +99,19 @@ const settle = <T>(p: Promise<T>): Promise<Settled<T>> =>
   );
 
 const iso = (t: number) => new Date(t).toISOString();
+const round1 = (x: number) => Math.round(x * 10) / 10;
 const pointOf = (l: ViewingLocation): Coordinates => ({ lat: l.latitude, lon: l.longitude });
 const UNKNOWN_ROAD: RoadSafety = { status: "unknown", segments: [], coverage: "none", source: "none" };
+const NO_OUTLOOK: AuroraOutlook = { activity: null, available: false, eveningDate: null, kpNow: null, kpPeak: null, source: "typical" };
+const EMPTY_COMPONENTS: ScoreComponents = {
+  skyView: 0,
+  aurora: 0,
+  kp: 0,
+  oval: { position: "north", distanceDeg: 0, elevationDeg: 0 },
+  thresholdKr: 1,
+  brightSky: null,
+  camera: null,
+};
 
 function toNightDto(night: Night): NightWindow {
   return {
@@ -105,6 +127,7 @@ function initialStatus(ctx: EngineContext): DataStatus {
   const state = ctx.demo ? "demo" : "ok";
   return {
     aurora: { state },
+    spaceWeather: ctx.providers.spaceWeather ? { state } : { state: "disabled" },
     weather: { state },
     routing: { state },
     roads: { state },
@@ -116,23 +139,23 @@ function initialStatus(ctx: EngineContext): DataStatus {
 }
 
 /** Data older than this was served from cache because a refresh failed — say so instead of calling it live. */
-const STALE_AFTER = { aurora: 30 * MINUTE, roads: 15 * MINUTE };
+const STALE_AFTER = { aurora: 30 * MINUTE, spaceWeather: 30 * MINUTE, roads: 15 * MINUTE };
 const isStale = (fetchedAt: string | undefined, now: number, limit: number) =>
   fetchedAt !== undefined && now - Date.parse(fetchedAt) > limit;
 
-function resolveAurora(
-  result: Settled<Awaited<ReturnType<AuroraProvider["getForecast"]>>>,
+/** IMO's Kp forecast for tonight's midnight (null when unavailable), with source status and notices. */
+function resolveImo(
+  result: Settled<AuroraForecast>,
   eveningDate: string,
   ctx: EngineContext,
   status: DataStatus,
   notices: string[],
   now: number,
-): RecommendationResponse["aurora"] {
+): number | null {
   if (!result.ok) {
     logProviderError("aurora", result.error);
     status.aurora = { state: "unavailable", message: describeError(result.error) };
-    notices.push("Aurora activity temporarily unavailable — rankings use sky conditions only.");
-    return { activity: null, available: false, eveningDate };
+    return null;
   }
   const { activity, fromDate } = activityForNight(result.value, eveningDate);
   const approximate = fromDate !== null && fromDate !== eveningDate;
@@ -141,17 +164,69 @@ function resolveAurora(
     state: ctx.demo ? "demo" : activity === null || approximate || stale ? "degraded" : "ok",
     fetchedAt: result.value.fetchedAt,
   };
-  if (activity === null) {
-    status.aurora.message = "No IMO activity forecast for tonight.";
-    notices.push("IMO has not published an aurora activity forecast for tonight — rankings use sky conditions only.");
-  } else if (approximate) {
-    status.aurora.message = `Using IMO's forecast for the night of ${fromDate}.`;
-  }
+  if (activity === null) status.aurora.message = "No IMO activity forecast for tonight.";
+  else if (approximate) status.aurora.message = `Using IMO's forecast for the night of ${fromDate}.`;
   if (stale) {
     status.aurora.message = "Latest update failed; showing the last forecast received.";
     notices.push(`The aurora forecast couldn't be refreshed — showing IMO data from ${formatTime(result.value.fetchedAt)}.`);
   }
-  return { activity, available: activity !== null, eveningDate };
+  return activity;
+}
+
+/** NOAA's Kp forecast and (fresh) real-time estimate, with source status. */
+function resolveSpaceWeather(
+  result: Settled<SpaceWeather> | null,
+  ctx: EngineContext,
+  status: DataStatus,
+  now: number,
+): Pick<ActivityInputs, "nowcast" | "kpForecast"> {
+  if (!result) return { nowcast: null, kpForecast: [] };
+  if (!result.ok) {
+    logProviderError("space weather", result.error);
+    status.spaceWeather = { state: "unavailable", message: describeError(result.error) };
+    return { nowcast: null, kpForecast: [] };
+  }
+  const { kp, nowcast, fetchedAt } = result.value;
+  const fresh = nowcast !== null && now - nowcast.time <= NOWCAST_MAX_AGE_MS;
+  const stale = !ctx.demo && isStale(fetchedAt, now, STALE_AFTER.spaceWeather);
+  status.spaceWeather = { state: ctx.demo ? "demo" : stale || kp.length === 0 || !fresh ? "degraded" : "ok", fetchedAt };
+  if (stale) status.spaceWeather.message = "Latest update failed; showing the last data received.";
+  else if (kp.length === 0) status.spaceWeather.message = "Kp forecast unavailable; using the real-time estimate.";
+  else if (!fresh) status.spaceWeather.message = "No recent real-time estimate; using the Kp forecast.";
+  return { nowcast: fresh ? nowcast : null, kpForecast: kp };
+}
+
+const SOURCE_RANK: ActivitySource[] = ["nowcast", "forecast", "imo", "typical"];
+
+/** Tonight's activity at a glance: real-time Kp, the expected peak and the best source behind it. */
+function outlookFor(night: Night, inputs: ActivityInputs): AuroraOutlook {
+  const expected = night.slots.map((t) => ({ t, a: activityAt(t + SLOT_MS / 2, inputs) }));
+  const peak = expected.reduce<(typeof expected)[number] | null>((best, x) => (best === null || x.a.mean > best.a.mean ? x : best), null);
+  const sources = new Set(expected.map((x) => x.a.source));
+  return {
+    activity: inputs.imoKp,
+    available: inputs.imoKp !== null || inputs.kpForecast.length > 0 || inputs.nowcast !== null,
+    eveningDate: night.eveningDate,
+    kpNow: inputs.nowcast ? round1(inputs.nowcast.kp) : null,
+    kpPeak: peak ? { kp: round1(peak.a.mean), time: iso(peak.t) } : null,
+    source: SOURCE_RANK.find((s) => sources.has(s)) ?? "typical",
+  };
+}
+
+async function resolveActivity(
+  aurora: Promise<Settled<AuroraForecast>>,
+  spaceWeather: Promise<Settled<SpaceWeather>> | null,
+  night: Night,
+  ctx: EngineContext,
+  status: DataStatus,
+  notices: string[],
+  now: number,
+): Promise<{ inputs: ActivityInputs; outlook: AuroraOutlook }> {
+  const [imo, noaa] = await Promise.all([aurora, spaceWeather ?? Promise.resolve(null)]);
+  const inputs: ActivityInputs = { now, imoKp: resolveImo(imo, night.eveningDate, ctx, status, notices, now), ...resolveSpaceWeather(noaa, ctx, status, now) };
+  const outlook = outlookFor(night, inputs);
+  if (!outlook.available) notices.push("Aurora activity forecasts are unavailable — chances assume a typical night, so treat them as rough.");
+  return { inputs, outlook };
 }
 
 function resolveRoadsFreshness(fetchedAt: string | undefined, ctx: EngineContext, status: DataStatus, notices: string[], now: number) {
@@ -201,12 +276,14 @@ async function analyseCamera(
 
 type Candidate = { location: ViewingLocation; point: Coordinates; estimate: Route };
 
-/** Best sky among spots beyond the current drive limit, judged on estimated drive times only (no routing calls). */
+const winterConcern = (location: ViewingLocation, now: number) => !location.winterAccessible && isWinterSeason(now);
+
+/** Best chance among spots beyond the current drive limit, judged on estimated drive times only (no routing calls). */
 function findWiderOption(
   pool: Candidate[],
   weather: (HourlyWeather[] | Error)[],
   night: Night,
-  auroraActivity: number | null,
+  activity: ActivityInputs,
   now: number,
 ): WiderOption | null {
   let best: WiderOption | null = null;
@@ -214,10 +291,11 @@ function findWiderOption(
     const { location, estimate } = pool[i];
     const hourly = weather[i];
     if (!hourly || hourly instanceof Error || hourly.length === 0) continue;
-    if (!location.winterAccessible && isWinterSeason(now)) continue;
-    const evaluations = evaluateSlots({ location, hourly, slots: night.slots, auroraActivity, now });
+    if (winterConcern(location, now)) continue;
+    const evaluations = evaluateSlots({ location, hourly, slots: night.slots, activity, now });
     const plan = planVisit(evaluations, now, estimate.durationMinutes);
-    if (plan.windowStart === null || plan.windowEnd === null || plan.viewingScore < WIDER_MIN_SCORE) continue;
+    if (plan.windowStart === null || plan.windowEnd === null || plan.viewingScore < WIDER_MIN_CHANCE) continue;
+    if (!computeRecommendationScore({ chance: plan.viewingScore, driveMinutes: estimate.durationMinutes, roadStatus: "unknown", winterAccessConcern: false, scenery: location.scenery, maxGustKph: windowGustKph(hourly, plan) }).recommended) continue;
     if (best && plan.viewingScore <= best.viewingScore) continue;
     best = {
       travelMode: estimate.durationMinutes <= TRAVEL_MODES.standard.maxMinutes * ESTIMATE_TOLERANCE ? "standard" : "chase",
@@ -232,39 +310,53 @@ function findWiderOption(
   return best;
 }
 
+/** The wider suggestion names a destination, so it gets the same road veto as a recommendation (destination roads). */
+async function withSafeRoad(option: WiderOption | null, ctx: EngineContext, warm: Promise<unknown> | undefined): Promise<WiderOption | null> {
+  const location = option && ctx.locations.find((l) => l.id === option.locationId);
+  if (!option || !location) return null;
+  await warm;
+  const road = await ctx.providers.roads.assess(pointOf(location), null).catch(() => UNKNOWN_ROAD);
+  return BLOCKING_ROAD_STATUSES.includes(road.status) ? null : option;
+}
+
 /** Forecast cloud for the slot containing `now` — what a camera image taken now should agree with. */
 function forecastCloudNow(evaluations: SlotEvaluation[], now: number): number | null {
   const current = evaluations.find((e) => now >= e.time && now < e.time + SLOT_MS);
   return current ? current.conditions.clouds.effective : null;
 }
 
+/** The best reachable half hour of a plan (or of the night when nothing is reachable). */
+function bestSlot(evaluations: SlotEvaluation[], plan: VisitPlan): SlotEvaluation | undefined {
+  if (plan.window) return evaluations[plan.window.peakIndex];
+  const reachable = evaluations.filter((_, i) => plan.reachable[i]);
+  const pool = reachable.length > 0 ? reachable : evaluations;
+  return pool.reduce<SlotEvaluation | undefined>((best, e) => (!best || e.chance > best.chance ? e : best), undefined);
+}
+
 export function buildRecommendation(args: {
   location: ViewingLocation;
+  hourly: HourlyWeather[];
   evaluations: SlotEvaluation[];
   plan: VisitPlan;
   travel: Route;
   road: RoadSafety;
   camera?: NearbyCamera;
-  auroraActivity: number | null;
+  activity: ActivityInputs;
   now: number;
 }): Recommendation {
-  const { location, evaluations, plan, travel, road, camera, auroraActivity, now } = args;
+  const { location, hourly, evaluations, plan, travel, road, camera, activity, now } = args;
   const window = plan.window;
-  const winterAccessConcern = !location.winterAccessible && isWinterSeason(now);
+  const winterAccessConcern = winterConcern(location, now);
+  const peakEval: SlotEvaluation | undefined = bestSlot(evaluations, plan);
+  const maxGustKph = windowGustKph(hourly, plan);
 
-  const peakIndex = window
-    ? window.peakIndex
-    : evaluations.reduce((best, e, i) => (e.score > (evaluations[best]?.score ?? -1) ? i : best), 0);
-  const peakEval: SlotEvaluation | undefined = evaluations[peakIndex];
-
-  const windowMinutes = plan.windowStart !== null && plan.windowEnd !== null ? (plan.windowEnd - plan.windowStart) / MINUTE : 0;
-  const { score, recommended } = computeRecommendationScore({
-    viewingScore: plan.viewingScore,
-    windowMinutes,
+  const trip = computeRecommendationScore({
+    chance: plan.viewingScore,
     driveMinutes: travel.durationMinutes,
     roadStatus: road.status,
     winterAccessConcern,
     scenery: location.scenery,
+    maxGustKph,
   });
 
   let reasons: string[] = [];
@@ -278,20 +370,24 @@ export function buildRecommendation(args: {
       windowStart: plan.windowStart,
       windowEnd: plan.windowEnd,
       peakTime: peakEval.time,
-      peakScore: window.peakScore,
+      peakScore: plan.peakScore,
       peak: peakEval.conditions,
-      auroraActivity,
+      peakComponents: peakEval.components,
+      kpNow: activity.nowcast ? round1(activity.nowcast.kp) : null,
       road,
       camera,
       moonUpDuringWindow: windowEvals.some((e) => e.conditions.moonAltitude > 0),
       missedPeak: plan.nightPeak && plan.nightPeak.time + SLOT_MS / 2 < plan.earliestViewing ? plan.nightPeak : null,
       winterAccessConcern,
+      maxGustKph,
     }));
     const obs = camera?.observation;
     const forecastNow = forecastCloudNow(evaluations, now);
     confidence = computeConfidence({
       hoursAhead: (plan.windowStart - now) / HOUR,
-      auroraAvailable: auroraActivity !== null,
+      activitySource: peakEval.conditions.kpSource,
+      scenarioChances: plan.scenarioChances,
+      scenarioWeights: SCENARIO_WEIGHTS,
       windowClouds: evaluations
         .slice(Math.max(0, window.startIndex - 2), window.endIndex + 3)
         .map((e) => e.conditions.clouds.effective),
@@ -304,13 +400,20 @@ export function buildRecommendation(args: {
     warnings = ["No reachable viewing window remains tonight."];
   }
 
+  const notRecommendedReason =
+    trip.blockedBy === "road"
+      ? `Not recommended: road ${road.status === "closed" ? "closed" : "conditions are difficult"}${road.description ? ` — ${road.description}` : ""}.`
+      : trip.blockedBy === "wind"
+        ? `Not recommended: storm-force gusts up to ${Math.round(maxGustKph ?? 0)} km/h are forecast there — wait for the wind to drop.`
+        : undefined;
+
   return {
     rank: 0,
     location,
     viewingScore: plan.viewingScore,
     peakScore: plan.peakScore,
     skyPeak: plan.nightPeak ? { time: iso(plan.nightPeak.time), score: plan.nightPeak.score } : null,
-    recommendationScore: score,
+    recommendationScore: trip.score,
     label: scoreLabel(plan.viewingScore),
     bestWindow:
       window && plan.windowStart !== null && plan.windowEnd !== null && peakEval
@@ -326,16 +429,15 @@ export function buildRecommendation(args: {
       source: travel.source,
       geometry: travel.geometry ? thinLine(travel.geometry, 160) : undefined,
     },
-    components: peakEval?.components ?? { clouds: 0, aurora: null, darkness: 0, lightPollution: 0, weather: 0, camera: null },
+    components: peakEval?.components ?? EMPTY_COMPONENTS,
     conditions: peakEval?.conditions ?? null,
     reasons,
     warnings,
     confidence,
     road,
-    recommended,
-    notRecommendedReason: recommended
-      ? undefined
-      : `Not recommended: road ${road.status === "closed" ? "closed" : "conditions are difficult"}${road.description ? ` — ${road.description}` : ""}.`,
+    recommended: trip.recommended,
+    blockedBy: trip.blockedBy ?? undefined,
+    notRecommendedReason,
     camera,
     hourly: evaluations.map((e, i) => ({
       time: iso(e.time),
@@ -358,7 +460,7 @@ export function compareRecommendations(a: Recommendation, b: Recommendation): nu
 
 /**
  * The central pipeline:
- * origin → candidates → cheap distance filter → weather + aurora → location × time scoring →
+ * origin → candidates → cheap distance filter → weather + activity → location × time chances →
  * provisional ranking → routing for the best few → road / camera enrichment → final ranking.
  */
 export async function recommend(req: RecommendRequest, ctx: EngineContext): Promise<RecommendationResponse> {
@@ -376,11 +478,12 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
     travelMode,
     maxTravelMinutes: maxMinutes,
     night: null,
-    aurora: { activity: null, available: false, eveningDate: null },
+    aurora: NO_OUTLOOK,
     summary: { headline: tonightHeadline(null), level: null },
     recommendations: [],
     notRecommended: [],
     widerOption: null,
+    limitingFactor: null,
     notices,
     dataStatus: status,
     ...partial,
@@ -394,6 +497,7 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
 
   // Location-independent sources start straight away and run in parallel with everything else.
   const auroraPromise = settle(providers.aurora.getForecast());
+  const spaceWeatherPromise = providers.spaceWeather ? settle(providers.spaceWeather.getSpaceWeather()) : null;
   const roadsWarm = providers.roads.prefetch?.().catch(() => undefined);
   const camerasWarm = providers.cameras?.getAllCameras().catch(() => undefined);
 
@@ -406,23 +510,25 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
   const widerPool =
     travelMode === "chase" ? [] : all.filter((c) => !inMode(c, maxMinutes) && inMode(c, TRAVEL_MODES.chase.maxMinutes)).slice(0, WIDER_POOL);
 
-  // Phase 2 — weather (batched, cached) and aurora, concurrently.
+  // Phase 2 — weather (batched, cached) and activity (NOAA + IMO), concurrently.
   const points = [...candidates, ...widerPool].map((c) => c.point);
-  const [auroraResult, weatherAll] = await Promise.all([
-    auroraPromise,
+  const [{ inputs: activity, outlook: aurora }, weatherAll] = await Promise.all([
+    resolveActivity(auroraPromise, spaceWeatherPromise, night, ctx, status, notices, now),
     points.length > 0 ? fetchWeather(providers.weather, points) : Promise.resolve([]),
   ]);
-  const aurora = resolveAurora(auroraResult, night.eveningDate, ctx, status, notices, now);
   const nightDto = toNightDto(night);
   const weather = weatherAll.slice(0, candidates.length);
-  const wider = findWiderOption(widerPool, weatherAll.slice(candidates.length), night, aurora.activity, now);
-  const widerThan = (score: number | null) => (wider && (score === null || wider.viewingScore >= score + WIDER_MIN_GAIN) ? wider : null);
-  if (candidates.length === 0) return respond({ night: nightDto, aurora, emptyReason: "no-candidates", widerOption: widerThan(null) });
+  const widerChecked = withSafeRoad(findWiderOption(widerPool, weatherAll.slice(candidates.length), night, activity, now), ctx, roadsWarm);
+  const widerThan = async (chance: number | null) => {
+    const wider = await widerChecked;
+    return wider && (chance === null || wider.viewingScore >= chance + WIDER_MIN_GAIN) ? wider : null;
+  };
+  if (candidates.length === 0) return respond({ night: nightDto, aurora, emptyReason: "no-candidates", widerOption: await widerThan(null) });
 
   const scored = candidates.flatMap((c, i) => {
     const hourly = weather[i];
     if (!hourly || hourly instanceof Error || hourly.length === 0) return [];
-    return [{ ...c, hourly, evaluations: evaluateSlots({ location: c.location, hourly, slots: night.slots, auroraActivity: aurora.activity, now }) }];
+    return [{ ...c, hourly, evaluations: evaluateSlots({ location: c.location, hourly, slots: night.slots, activity, now }) }];
   });
   const failedWeather = candidates.length - scored.length;
   if (failedWeather > 0) logProviderError("weather", weather.find((w) => w instanceof Error));
@@ -437,25 +543,37 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
   }
 
   // Phase 3 — provisional ranking on estimated drive times.
-  const provisional = scored
-    .map((s) => {
-      const plan = planVisit(s.evaluations, now, s.estimate.durationMinutes);
-      const windowMinutes = plan.windowStart !== null && plan.windowEnd !== null ? (plan.windowEnd - plan.windowStart) / MINUTE : 0;
-      const prelim = computeRecommendationScore({
-        viewingScore: plan.viewingScore,
-        windowMinutes,
-        driveMinutes: s.estimate.durationMinutes,
-        roadStatus: "unknown",
-        winterAccessConcern: !s.location.winterAccessible && isWinterSeason(now),
-        scenery: s.location.scenery,
-      }).score;
-      return { s, plan, prelim };
-    })
+  const planned = scored.map((s) => {
+    const plan = planVisit(s.evaluations, now, s.estimate.durationMinutes);
+    const prelim = computeRecommendationScore({
+      chance: plan.viewingScore,
+      driveMinutes: s.estimate.durationMinutes,
+      roadStatus: "unknown",
+      winterAccessConcern: winterConcern(s.location, now),
+      scenery: s.location.scenery,
+      maxGustKph: windowGustKph(s.hourly, plan),
+    }).score;
+    return { s, plan, prelim };
+  });
+  const provisional = planned
     .filter((p) => p.plan.window !== null)
     .sort((a, b) => b.prelim - a.prelim)
     .slice(0, ROUTE_TOP_N);
 
-  if (provisional.length === 0) return respond({ night: nightDto, aurora, emptyReason: "no-window", widerOption: widerThan(null) });
+  if (provisional.length === 0) {
+    // Nothing worth recommending: either no half hour can be reached in time, or none gives a real chance.
+    const reachable = planned.filter((p) => p.plan.reachable.some(Boolean));
+    const best = reachable
+      .map((p) => bestSlot(p.s.evaluations, p.plan))
+      .reduce<SlotEvaluation | undefined>((b, e) => (e && (!b || e.chance > b.chance) ? e : b), undefined);
+    return respond({
+      night: nightDto,
+      aurora,
+      emptyReason: reachable.length > 0 ? "no-chance" : "no-window",
+      limitingFactor: best ? limitingFactor(best.components) : null,
+      widerOption: await widerThan(null),
+    });
+  }
 
   // Phase 4 — route only the strongest candidates.
   const routingDeadline = Date.now() + (ctx.routingBudgetMs ?? DEFAULT_ROUTING_BUDGET_MS);
@@ -520,7 +638,7 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
     }
   }
 
-  // Phase 6 — final ranking with real travel times, road safety and camera evidence.
+  // Phase 6 — final ranking with real travel times, road safety, wind and camera evidence.
   let withinTravelLimit = 0;
   const final = provisional.flatMap((p, i) => {
     const travel = travels[i];
@@ -529,11 +647,11 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
     withinTravelLimit++;
     const camera = cameras[i];
     const evaluations = camera?.observation
-      ? evaluateSlots({ location: p.s.location, hourly: p.s.hourly, slots: night.slots, auroraActivity: aurora.activity, now, camera: camera.observation })
+      ? evaluateSlots({ location: p.s.location, hourly: p.s.hourly, slots: night.slots, activity, now, camera: camera.observation })
       : p.s.evaluations;
     const plan = planVisit(evaluations, now, travel.durationMinutes);
     if (!plan.window) return [];
-    return [buildRecommendation({ location: p.s.location, evaluations, plan, travel, road: roads[i], camera, auroraActivity: aurora.activity, now })];
+    return [buildRecommendation({ location: p.s.location, hourly: p.s.hourly, evaluations, plan, travel, road: roads[i], camera, activity, now })];
   });
   final.sort(compareRecommendations);
 
@@ -547,7 +665,8 @@ export async function recommend(req: RecommendRequest, ctx: EngineContext): Prom
     summary: { headline: tonightHeadline(top ? top.viewingScore : null), level: top ? scoreLabel(top.viewingScore) : null },
     recommendations,
     notRecommended,
-    widerOption: widerThan(top ? top.viewingScore : null),
+    widerOption: await widerThan(top ? top.viewingScore : null),
+    limitingFactor: top && top.label !== "Excellent" ? limitingFactor(top.components) : null,
     emptyReason: final.length > 0 ? undefined : withinTravelLimit === 0 ? "no-candidates" : "no-window",
   });
 }
@@ -589,7 +708,7 @@ export async function evaluateLocation(
     origin,
     travelMode: req.travelMode,
     night: null,
-    aurora: { activity: null, available: false, eveningDate: null },
+    aurora: NO_OUTLOOK,
     recommendation: null,
     moon: null,
     nearbyCameras: [],
@@ -601,8 +720,16 @@ export async function evaluateLocation(
   if (!night) return base;
 
   const zeroTravel: Route = { durationMinutes: 0, distanceKm: 0, source: "estimate", estimated: true };
-  const [auroraResult, weatherResult, routeResult, nearbyResult] = await Promise.all([
-    settle(providers.aurora.getForecast()),
+  const [{ inputs: activity, outlook: aurora }, weatherResult, routeResult, nearbyResult] = await Promise.all([
+    resolveActivity(
+      settle(providers.aurora.getForecast()),
+      providers.spaceWeather ? settle(providers.spaceWeather.getSpaceWeather()) : null,
+      night,
+      ctx,
+      status,
+      notices,
+      now,
+    ),
     settle(providers.weather.getHourlyForecast(point.lat, point.lon)),
     origin ? settle(providers.routing.route(origin, point)) : Promise.resolve<Settled<Route>>({ ok: true, value: zeroTravel }),
     providers.cameras
@@ -610,7 +737,6 @@ export async function evaluateLocation(
       : Promise.resolve<Settled<NearbyCamera[]>>({ ok: true, value: [] }),
   ]);
 
-  const aurora = resolveAurora(auroraResult, night.eveningDate, ctx, status, notices, now);
   const travel = routeResult.ok ? routeResult.value : estimateRoute(origin as Origin, point);
   if (!routeResult.ok) {
     logProviderError("routing", routeResult.error);
@@ -662,9 +788,9 @@ export async function evaluateLocation(
     return { ...base, night: toNightDto(night), aurora, nearbyCameras };
   }
 
-  const evaluations = evaluateSlots({ location, hourly: weatherResult.value, slots: night.slots, auroraActivity: aurora.activity, now, camera: camera?.observation });
+  const evaluations = evaluateSlots({ location, hourly: weatherResult.value, slots: night.slots, activity, now, camera: camera?.observation });
   const plan = planVisit(evaluations, now, travel.durationMinutes);
-  const recommendation = buildRecommendation({ location, evaluations, plan, travel, road, camera, auroraActivity: aurora.activity, now });
+  const recommendation = buildRecommendation({ location, hourly: weatherResult.value, evaluations, plan, travel, road, camera, activity, now });
 
   return {
     ...base,

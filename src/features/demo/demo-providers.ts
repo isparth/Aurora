@@ -1,6 +1,6 @@
 import { VIEWING_LOCATIONS } from "@/data/viewing-locations";
-import type { CameraProvider, RoadConditionProvider, RoutingProvider, VisionProvider, WeatherProvider } from "@/domain/providers";
-import type { Camera, Coordinates, HourlyWeather, RoadSafety, RoadStatus } from "@/domain/types";
+import type { CameraProvider, RoadConditionProvider, RoutingProvider, SpaceWeatherProvider, VisionProvider, WeatherProvider } from "@/domain/providers";
+import type { Camera, Coordinates, HourlyWeather, KpPoint, RoadSafety, RoadStatus } from "@/domain/types";
 import type { EngineContext } from "@/features/recommendations/engine";
 import { cameraMetadata } from "@/features/cameras/irca-cameras";
 import { estimateRoute } from "@/features/routing/estimate";
@@ -143,6 +143,26 @@ const demoCameras: CameraProvider = {
   getImageTimestamp: async (id) => (id === DEMO_CAMERA.id ? new Date(DEMO_NOW - 4 * MINUTE).toISOString() : undefined),
 };
 
+/** A moderately active night: quiet early, rising to Kp ≈ 3.7 around midnight (3-hour blocks, UTC). */
+const DEMO_KP: [number, number, KpPoint["kind"]][] = [
+  [12, 2.33, "observed"],
+  [15, 2.67, "observed"],
+  [18, 3, "estimated"],
+  [21, 3.67, "predicted"],
+  [24, 3.33, "predicted"],
+  [27, 2.67, "predicted"],
+  [30, 2, "predicted"],
+];
+
+const demoSpaceWeather: SpaceWeatherProvider = {
+  getSpaceWeather: async () => ({
+    source: "demo",
+    fetchedAt: new Date(DEMO_NOW - 4 * MINUTE).toISOString(),
+    kp: DEMO_KP.map(([hour, kp, kind]) => ({ time: Date.UTC(2026, 1, 16, hour), kp, kind })),
+    nowcast: { time: DEMO_NOW - 2 * MINUTE, kp: 2.67 },
+  }),
+};
+
 const demoVision: VisionProvider = {
   model: "demo-vision",
   analyze: async (_image, _camera, now) => ({
@@ -172,6 +192,7 @@ export function demoContext(): EngineContext {
           nights: [{ eveningDate: DEMO_EVENING, activity: 4, moonDescription: "Moon does not rise" }],
         }),
       },
+      spaceWeather: demoSpaceWeather,
       weather: demoWeather,
       routing: demoRouting,
       roads: demoRoads,

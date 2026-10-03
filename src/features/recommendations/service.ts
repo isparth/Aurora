@@ -7,13 +7,14 @@ import { selectVisionProvider } from "@/features/cameras/vision";
 import { DEMO_NOW, demoContext } from "@/features/demo/demo-providers";
 import { ircaRoadProvider } from "@/features/roads/irca-provider";
 import { selectRoutingProvider } from "@/features/routing/providers";
+import { noaaSpaceWeatherProvider } from "@/features/space-weather/noaa-provider";
 import { openMeteoProvider } from "@/features/weather/open-meteo-provider";
 
 import { evaluateLocation, recommend, type EngineContext } from "./engine";
 import { computeNight } from "./night";
 
 export type TonightGlance = {
-  /** Null when IMO is unavailable or has no forecast for tonight. */
+  /** IMO's Kp forecast for midnight; null when IMO is unavailable or has no forecast for tonight. */
   activity: number | null;
   /** Reykjavík's dark hours tonight; null in the bright summer months. */
   dark: { from: string; until: string } | null;
@@ -34,6 +35,7 @@ export function liveContext(): EngineContext {
   return {
     providers: {
       aurora: imoAuroraProvider,
+      spaceWeather: noaaSpaceWeatherProvider,
       weather: openMeteoProvider,
       routing: selectRoutingProvider(),
       roads: ircaRoadProvider,

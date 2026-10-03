@@ -1,15 +1,31 @@
-import { CloudOff, Globe2, MoonStar, Route, Sunrise } from "lucide-react";
+import { Cloud, CloudOff, Globe2, MoonStar, Route, Sunrise } from "lucide-react";
 import Link from "next/link";
 
 import { buttonClass } from "@/components/ui/button";
-import type { EmptyReason, TravelMode } from "@/domain/types";
+import type { EmptyReason, LimitingFactor, TravelMode } from "@/domain/types";
 import { TRAVEL_MODES } from "@/features/recommendations/travel-modes";
 import { resultsHref, type PlaceParams } from "@/lib/links";
 
 const NEXT_MODE: Partial<Record<TravelMode, TravelMode>> = { nearby: "standard", standard: "chase" };
 
+const NO_CHANCE: Record<LimitingFactor, string> = {
+  clouds: "Thick cloud covers every spot within reach for the rest of the night. Icelandic cloud can clear fast — check again later, or search further.",
+  activity: "Aurora activity is forecast to stay too low to be seen from here tonight. It can change within the hour — check again later.",
+  "bright-sky": "The sky stays too bright tonight — twilight or a bright moon — for anything but an exceptional display.",
+};
+
 /** Explains an empty result (the headline above it already says what happened) and offers the next step. */
-export function EmptyState({ reason, params, travelMode }: { reason: EmptyReason; params: PlaceParams; travelMode: TravelMode }) {
+export function EmptyState({
+  reason,
+  params,
+  travelMode,
+  limitingFactor,
+}: {
+  reason: EmptyReason;
+  params: PlaceParams;
+  travelMode: TravelMode;
+  limitingFactor: LimitingFactor | null;
+}) {
   const wider = NEXT_MODE[travelMode];
   const content: Record<EmptyReason, { icon: typeof Globe2; body: string }> = {
     "outside-coverage": {
@@ -32,6 +48,10 @@ export function EmptyState({ reason, params, travelMode }: { reason: EmptyReason
       icon: MoonStar,
       body: "Dawn arrives before you could reach a spot with a usable sky. Check again this evening.",
     },
+    "no-chance": {
+      icon: Cloud,
+      body: NO_CHANCE[limitingFactor ?? "clouds"],
+    },
   };
   const { icon: Icon, body } = content[reason];
 
@@ -40,7 +60,7 @@ export function EmptyState({ reason, params, travelMode }: { reason: EmptyReason
       <Icon aria-hidden className="mx-auto h-8 w-8 text-ink-subtle" />
       <p className="mx-auto mt-3 max-w-sm text-[15px] leading-relaxed text-ink-muted">{body}</p>
       <div className="mt-5 flex flex-wrap justify-center gap-3">
-        {reason === "no-candidates" && wider && (
+        {(reason === "no-candidates" || (reason === "no-chance" && limitingFactor === "clouds")) && wider && (
           <Link href={resultsHref({ ...params, mode: wider })} className={buttonClass({ variant: "aurora" })}>
             Search within {TRAVEL_MODES[wider].phrase}
           </Link>

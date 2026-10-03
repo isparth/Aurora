@@ -21,7 +21,7 @@ export function TonightGlance({ glance }: { glance: Glance }) {
       {glance.activity !== null && (
         <li className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5">
           <Sparkles aria-hidden className="h-3.5 w-3.5 text-aurora-300" />
-          Aurora activity tonight <span className="font-semibold text-ink">{glance.activity}/9</span> · {activityWord(glance.activity)}
+          Aurora forecast tonight <span className="font-semibold text-ink">Kp {glance.activity}</span> · {activityWord(glance.activity)}
         </li>
       )}
       <li className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5">

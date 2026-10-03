@@ -7,10 +7,16 @@ import type {
   NearbyCamera,
   RoadSafety,
   Route,
+  SpaceWeather,
 } from "./types";
 
 export interface AuroraProvider {
   getForecast(): Promise<AuroraForecast>;
+}
+
+/** Geomagnetic activity (Kp): recent observations, a 3-day forecast and a real-time estimate. */
+export interface SpaceWeatherProvider {
+  getSpaceWeather(): Promise<SpaceWeather>;
 }
 
 export interface WeatherProvider {

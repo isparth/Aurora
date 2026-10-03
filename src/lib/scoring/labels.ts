@@ -1,32 +1,43 @@
-import type { RoadStatus, ScoreLabel } from "@/domain/types";
+import type { ActivitySource, RoadStatus, ScoreComponents, ScoreLabel } from "@/domain/types";
 
-export function scoreLabel(score: number): ScoreLabel {
-  if (score >= 80) return "Excellent";
-  if (score >= 65) return "Good";
-  if (score >= 45) return "Fair";
+/** Labels for a 0–100 chance of seeing the aurora. */
+export function scoreLabel(chance: number): ScoreLabel {
+  if (chance >= 70) return "Excellent";
+  if (chance >= 45) return "Good";
+  if (chance >= 20) return "Fair";
   return "Poor";
 }
 
+/**
+ * A chance as people should read it: to the nearest 5%, never "0%" or "100%" — the model is good to
+ * roughly ±10–15 points, and the sky can always surprise.
+ */
+export function formatChance(chance: number): string {
+  if (chance < 5) return "<5%";
+  if (chance > 95) return ">95%";
+  return `${Math.round(chance / 5) * 5}%`;
+}
+
 const OPPORTUNITY: Record<ScoreLabel, string> = {
-  Excellent: "Excellent opportunity",
-  Good: "Promising",
-  Fair: "Possible",
-  Poor: "Poor conditions",
+  Excellent: "Very good chance",
+  Good: "Good chance",
+  Fair: "Some chance",
+  Poor: "Unlikely",
 };
 
-export function opportunityLabel(score: number): string {
-  return OPPORTUNITY[scoreLabel(score)];
+export function opportunityLabel(chance: number): string {
+  return OPPORTUNITY[scoreLabel(chance)];
 }
 
 const TONIGHT: Record<ScoreLabel, string> = {
-  Excellent: "Excellent tonight",
-  Good: "Promising tonight",
-  Fair: "Possible tonight",
-  Poor: "Poor tonight",
+  Excellent: "Very good chance tonight",
+  Good: "Good chance tonight",
+  Fair: "Some chance tonight",
+  Poor: "Aurora unlikely tonight",
 };
 
-export function tonightHeadline(score: number | null): string {
-  return score === null ? "No viewing window tonight" : TONIGHT[scoreLabel(score)];
+export function tonightHeadline(chance: number | null): string {
+  return chance === null ? "No viewing window tonight" : TONIGHT[scoreLabel(chance)];
 }
 
 export function cloudLabel(fraction: number): string {
@@ -51,12 +62,27 @@ export function sceneryLabel(scenery: number): "Iconic spot" | "Scenic spot" | n
   return null;
 }
 
-export function darknessQualityLabel(darkness: number): string {
-  if (darkness >= 0.9) return "Excellent";
-  if (darkness >= 0.7) return "Good";
-  if (darkness >= 0.4) return "Twilight";
-  return "Too bright";
+/** How dark the sky is for the aurora, in words: what brightens it and what that means for faint displays. */
+export function skyDarknessLabel(c: Pick<ScoreComponents, "brightSky" | "thresholdKr">): { label: string; detail: string } {
+  if (c.thresholdKr >= 25) return { label: "Too bright", detail: "Only an exceptional display would show" };
+  switch (c.brightSky) {
+    case "twilight":
+      return { label: "Twilight", detail: c.thresholdKr >= 8 ? "Only bright aurora shows until it gets darker" : "Faint aurora may be lost" };
+    case "moon":
+      return { label: "Moonlit", detail: c.thresholdKr >= 4 ? "Only moderate or strong aurora will stand out" : "Faint aurora may be lost" };
+    case "lights":
+      return { label: "Some town glow", detail: "Faint aurora may be lost — face away from the lights" };
+    default:
+      return { label: "Dark", detail: "Even faint aurora will show" };
+  }
 }
+
+export const ACTIVITY_SOURCE_LABEL: Record<ActivitySource, string> = {
+  nowcast: "Real-time (NOAA)",
+  forecast: "NOAA forecast",
+  imo: "IMO forecast",
+  typical: "Typical night — no forecast",
+};
 
 export const ROAD_STATUS_LABEL: Record<RoadStatus, string> = {
   good: "Good",

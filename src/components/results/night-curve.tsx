@@ -6,7 +6,7 @@ const W = 300;
 const H = 56;
 
 /**
- * Tonight at a glance: sky score through the night, the best window highlighted, the hours you
+ * Tonight at a glance: the chance through the night, the best window highlighted, the hours you
  * can't reach in time faded, and a "now" marker. Decorative — the same facts are given as text.
  */
 export function NightCurve({ rec, now }: { rec: Recommendation; now: number }) {

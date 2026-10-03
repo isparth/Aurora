@@ -3,37 +3,39 @@ import Link from "next/link";
 
 import { buttonClass } from "@/components/ui/button";
 import { ConfidenceChip } from "@/components/ui/confidence";
-import { ConfidenceTip, ViewingScoreTip } from "@/components/ui/glossary";
+import { ChanceTip, ConfidenceTip } from "@/components/ui/glossary";
 import { SceneryBadge } from "@/components/ui/scenery-badge";
 import { LABEL_STYLE } from "@/components/ui/score";
 import { ShareButton } from "@/components/ui/share-button";
 import type { Recommendation } from "@/domain/types";
-import { activityWord, distanceText, pct, ROAD_TONE } from "@/lib/format";
+import { activityWord, distanceText, kpText, pct, ROAD_TONE } from "@/lib/format";
 import { directionsHref } from "@/lib/links";
 import { planTimes } from "@/lib/plan-time";
-import { darknessQualityLabel, lightPollutionLabel, ROAD_STATUS_LABEL, scoreLabel } from "@/lib/scoring/labels";
+import { formatChance, lightPollutionLabel, ROAD_STATUS_LABEL, scoreLabel, skyDarknessLabel } from "@/lib/scoring/labels";
 import { formatDuration } from "@/lib/time";
 
 import { NightCurve } from "./night-curve";
 import { ReasonList } from "./reason-list";
 
-function ScoreRing({ score }: { score: number }) {
-  const label = scoreLabel(score);
+function ChanceRing({ chance }: { chance: number }) {
+  const label = scoreLabel(chance);
   const c = 2 * Math.PI * 44;
   return (
     <div className="flex shrink-0 flex-col items-center">
       <div className="relative h-16 w-16">
         <svg viewBox="0 0 100 100" className="h-full w-full -rotate-90" aria-hidden>
           <circle cx="50" cy="50" r="44" fill="none" stroke="rgb(255 255 255 / 0.08)" strokeWidth="7" />
-          <circle cx="50" cy="50" r="44" fill="none" stroke={LABEL_STYLE[label].stroke} strokeWidth="7" strokeLinecap="round" strokeDasharray={`${(c * score) / 100} ${c}`} />
+          <circle cx="50" cy="50" r="44" fill="none" stroke={LABEL_STYLE[label].stroke} strokeWidth="7" strokeLinecap="round" strokeDasharray={`${(c * chance) / 100} ${c}`} />
         </svg>
-        <span className="tabular absolute inset-0 flex items-center justify-center text-[1.35rem] font-semibold">{score}</span>
+        <span aria-hidden className="tabular absolute inset-0 flex items-center justify-center text-[1.05rem] font-semibold">
+          {formatChance(chance)}
+        </span>
       </div>
       <span className={`mt-1 flex items-center text-xs font-semibold ${LABEL_STYLE[label].text}`}>
         {label}
-        <ViewingScoreTip />
+        <ChanceTip />
       </span>
-      <span className="sr-only">Viewing score {score} out of 100</span>
+      <span className="sr-only">{formatChance(chance)} chance of seeing the aurora</span>
     </div>
   );
 }
@@ -47,8 +49,9 @@ function Row({ label, value, tone = "text-ink" }: { label: string; value: string
   );
 }
 
-export function BestCard({ rec, detailHref, auroraActivity, now }: { rec: Recommendation; detailHref: string; auroraActivity: number | null; now: number }) {
+export function BestCard({ rec, detailHref, now }: { rec: Recommendation; detailHref: string; now: number }) {
   const c = rec.conditions;
+  const sky = skyDarknessLabel(rec.components);
   const { leave, window } = planTimes(rec, now);
   const shareText = `Northern lights plan: ${rec.location.name}. ${leave.label} ${leave.value}, best viewing ${window.value}.`;
 
@@ -70,7 +73,7 @@ export function BestCard({ rec, detailHref, auroraActivity, now }: { rec: Recomm
             <SceneryBadge scenery={rec.location.scenery} />
           </div>
         </div>
-        <ScoreRing score={rec.viewingScore} />
+        <ChanceRing chance={rec.viewingScore} />
       </div>
 
       <dl className="relative mt-5 grid grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] gap-px overflow-hidden rounded-xl border border-line bg-line">
@@ -124,8 +127,8 @@ export function BestCard({ rec, detailHref, auroraActivity, now }: { rec: Recomm
             </div>
             <p className="sr-only">{pct(1 - c.clouds.total)} clear sky</p>
           </div>
-          <Row label="Aurora activity" value={auroraActivity === null ? "Unavailable" : `${auroraActivity}/9 · ${activityWord(auroraActivity)}`} />
-          <Row label="Darkness" value={darknessQualityLabel(c.darkness)} />
+          <Row label="Aurora activity" value={`Kp ${kpText(c.kp)} · ${activityWord(c.kp)}`} />
+          <Row label="Sky" value={sky.label} />
           <Row label="Light pollution" value={lightPollutionLabel(rec.location.lightPollutionScore)} />
           <Row label="Road conditions" value={ROAD_STATUS_LABEL[rec.road.status]} tone={ROAD_TONE[rec.road.status]} />
         </dl>

@@ -11,14 +11,14 @@ import { ReasonList } from "@/components/results/reason-list";
 import { SiteFooter } from "@/components/site-footer";
 import { buttonClass } from "@/components/ui/button";
 import { ConfidenceChip } from "@/components/ui/confidence";
-import { ConfidenceTip, ViewingScoreTip } from "@/components/ui/glossary";
+import { ChanceTip, ConfidenceTip } from "@/components/ui/glossary";
 import { SceneryBadge } from "@/components/ui/scenery-badge";
 import { styleFor } from "@/components/ui/score";
 import { ShareButton } from "@/components/ui/share-button";
 import type { LocationDetail, ViewingLocation } from "@/domain/types";
 import { directionsHref, resultsHref, type PlaceParams } from "@/lib/links";
 import { planTimes } from "@/lib/plan-time";
-import { opportunityLabel, scoreLabel } from "@/lib/scoring/labels";
+import { formatChance, opportunityLabel, scoreLabel } from "@/lib/scoring/labels";
 import { formatTime } from "@/lib/time";
 import { useNow } from "@/lib/use-now";
 
@@ -88,12 +88,12 @@ export function DetailView({ detail, location, params }: { detail: LocationDetai
           {rec && rec.bestWindow ? (
             <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
               <span className="tabular text-4xl font-semibold tracking-tight">
-                {rec.viewingScore}
-                <span className="text-xl text-ink-subtle"> / 100</span>
+                {formatChance(rec.viewingScore)}
+                <span className="ml-1.5 text-xl text-ink-subtle">chance</span>
               </span>
               <span className={`flex items-center text-lg font-medium ${styleFor(rec.viewingScore).text}`}>
                 {opportunityLabel(rec.viewingScore)} tonight
-                <ViewingScoreTip />
+                <ChanceTip />
               </span>
             </p>
           ) : (
@@ -141,7 +141,7 @@ export function DetailView({ detail, location, params }: { detail: LocationDetai
                   Tonight, hour by hour
                 </h2>
                 <p className="tabular text-sm text-ink-muted" aria-live="polite">
-                  {formatTime(slot.time)} · <span className="font-semibold text-ink">{slot.score}</span> / 100 · {scoreLabel(slot.score)}
+                  {formatTime(slot.time)} · <span className="font-semibold text-ink">{formatChance(slot.score)}</span> this half hour · {scoreLabel(slot.score)}
                   {!slot.reachable && " · before you could arrive"}
                 </p>
               </div>
@@ -162,11 +162,16 @@ export function DetailView({ detail, location, params }: { detail: LocationDetai
               </div>
               <details className="group mt-4 rounded-xl border border-line px-4 py-3">
                 <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between text-sm text-ink-muted marker:hidden hover:text-ink">
-                  How the {slot.score} at {formatTime(slot.time)} is calculated
+                  How the {formatChance(slot.score)} at {formatTime(slot.time)} is worked out
                   <ChevronDown aria-hidden className="h-4 w-4 transition-transform group-open:rotate-180" />
                 </summary>
                 <div className="mt-3 pb-1">
-                  <ScoreBreakdown components={slot.components} cameraObserved={Boolean(rec.camera?.observation?.usable)} />
+                  <ScoreBreakdown
+                    components={slot.components}
+                    chance={slot.score}
+                    kpSource={slot.conditions.kpSource}
+                    cameraObserved={Boolean(rec.camera?.observation?.usable)}
+                  />
                 </div>
               </details>
             </section>

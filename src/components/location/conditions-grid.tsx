@@ -1,7 +1,7 @@
 import type { ConditionsAtTime, MoonInfo, RoadSafety, ViewingLocation } from "@/domain/types";
 import { darknessLabel } from "@/lib/astronomy/darkness";
-import { pct, ROAD_TONE } from "@/lib/format";
-import { cloudLabel, lightPollutionLabel, ROAD_STATUS_LABEL } from "@/lib/scoring/labels";
+import { activityWord, kpText, pct, ROAD_TONE } from "@/lib/format";
+import { ACTIVITY_SOURCE_LABEL, cloudLabel, lightPollutionLabel, ROAD_STATUS_LABEL } from "@/lib/scoring/labels";
 import { formatTime } from "@/lib/time";
 
 function Cell({ label, value, sub, tone = "text-ink", wide = false }: { label: string; value: string; sub?: string; tone?: string; wide?: boolean }) {
@@ -36,7 +36,7 @@ export function ConditionsGrid({
   return (
     <dl className="grid grid-cols-2 gap-x-6 sm:grid-cols-3">
       <Cell label="Cloud cover" value={pct(c.clouds.total)} sub={layers} wide />
-      <Cell label="Aurora activity" value={c.auroraActivity === null ? "Unavailable" : `${c.auroraActivity} / 9`} sub="IMO forecast" />
+      <Cell label="Aurora activity" value={`Kp ${kpText(c.kp)} · ${activityWord(c.kp)}`} sub={ACTIVITY_SOURCE_LABEL[c.kpSource]} />
       <Cell
         label="Darkness"
         value={darknessLabel(c.sunAltitude)}

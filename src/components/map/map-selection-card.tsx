@@ -5,7 +5,7 @@ import { buttonClass } from "@/components/ui/button";
 import { SceneryBadge } from "@/components/ui/scenery-badge";
 import { ScoreBadge } from "@/components/ui/score";
 import type { Recommendation } from "@/domain/types";
-import { windowText } from "@/lib/format";
+import { blockedText, windowText } from "@/lib/format";
 import { directionsHref } from "@/lib/links";
 import { formatDuration } from "@/lib/time";
 
@@ -26,8 +26,8 @@ export function MapSelectionCard({ rec, detailHref }: { rec: Recommendation; det
             </p>
           ) : (
             <p className="flex items-center gap-1 text-xs text-danger">
-              <OctagonAlert aria-hidden className="h-3.5 w-3.5" />
-              Road {rec.road.status === "closed" ? "closed" : "difficult"}
+              <OctagonAlert aria-hidden className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{blockedText(rec)}</span>
             </p>
           )}
         </div>

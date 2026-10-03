@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { CameraProvider, RoadConditionProvider, RoutingProvider, WeatherProvider } from "@/domain/providers";
+import type { CameraProvider, RoadConditionProvider, RoutingProvider, SpaceWeatherProvider, WeatherProvider } from "@/domain/providers";
 import type { Confidence, Coordinates, HourlyWeather, RoadStatus, ViewingLocation } from "@/domain/types";
 
 import { recommend, type EngineContext, type EngineProviders } from "./engine";
@@ -10,12 +10,14 @@ const REYKJAVIK = { lat: 64.1466, lon: -21.9426, label: "Reykjavík" };
 /** 19:30 Iceland time; the night (sun below −6°) begins at 20:00. */
 const NOW = Date.UTC(2026, 9, 2, 19, 30);
 
-const place = (id: string, lat: number, lon: number, scenery = 0.5): ViewingLocation => ({
+const place = (id: string, lat: number, lon: number, scenery = 0.5, cgmLatitude = 64.2): ViewingLocation => ({
   id,
   name: id,
   description: "",
   latitude: lat,
   longitude: lon,
+  cgmLatitude,
+  magneticMidnightUtc: 0.5,
   region: "Golden Circle",
   lightPollutionScore: 0.9,
   scenery,
@@ -86,6 +88,7 @@ function context(opts: {
   return {
     providers: {
       aurora: { getForecast: async () => ({ source: "imo", fetchedAt: new Date(NOW).toISOString(), nights: [{ eveningDate: "2026-10-02", activity: 4 }] }) },
+      spaceWeather: null,
       weather: weatherProvider,
       routing,
       roads,
@@ -108,7 +111,7 @@ describe("recommend — scenery", () => {
     locations: [iconic, plain],
   });
 
-  it("ranks the more spectacular spot first when the sky is the same, without inflating its sky score", async () => {
+  it("ranks the more spectacular spot first when the sky is the same, without inflating its chance", async () => {
     const res = await run(ctx);
     expect(ids(res.recommendations)).toEqual([iconic.id, plain.id]);
     const [first, second] = res.recommendations;
@@ -130,6 +133,17 @@ describe("recommend — clearer skies further away", () => {
     expect(ids(res.recommendations)).not.toContain(FAR.id);
     expect(res.widerOption).toMatchObject({ locationId: FAR.id, travelMode: "chase" });
     expect(res.widerOption!.viewingScore).toBeGreaterThanOrEqual(res.recommendations[0].viewingScore + 15);
+  });
+
+  it("never points to a spot further away whose road is closed", async () => {
+    const closedFar = context({
+      weather: { [A.id]: weather(() => 0.9), [B.id]: weather(() => 0.85), [FAR.id]: clearAllNight },
+      drive: { [A.id]: 45, [B.id]: 40 },
+      roads: { [FAR.id]: "closed" },
+      locations: [A, B, FAR],
+    });
+    const res = await recommend({ origin: REYKJAVIK, travelMode: "standard", now: NOW }, closedFar);
+    expect(res.widerOption).toBeNull();
   });
 
   it("stays quiet when the extra drive wouldn't buy a clearly better sky", async () => {
@@ -158,19 +172,29 @@ describe("recommend — location × time", () => {
 });
 
 describe("recommend — travel time", () => {
-  it("ranks a briefly clear spot first when you can get there in time", async () => {
-    const res = await run(context({ weather: { [A.id]: clearUntil21, [B.id]: steadyPartlyClear }, drive: { [A.id]: 10, [B.id]: 20 } }));
+  /** Clear from 22:00 to about 00:30 — the active hours around magnetic midnight — and overcast otherwise. */
+  const clearLate = weather((h) => (h >= 22 || h === 0 ? 0.05 : 0.95));
+  const mostlyCloudy = weather(() => 0.75);
+
+  it("ranks a spot that clears during the active hours first when you can get there in time", async () => {
+    const res = await run(context({ weather: { [A.id]: clearLate, [B.id]: mostlyCloudy }, drive: { [A.id]: 10, [B.id]: 20 } }));
     expect(ids(res.recommendations)[0]).toBe(A.id);
   });
 
-  it("drops that spot when its clear spell ends before you could arrive", async () => {
-    const res = await run(context({ weather: { [A.id]: clearUntil21, [B.id]: steadyPartlyClear }, drive: { [A.id]: 120, [B.id]: 20 } }));
+  it("drops that spot once its clear spell is over by the time you could arrive", async () => {
+    const late = Date.UTC(2026, 9, 2, 23, 30);
+    const res = await recommend(
+      { origin: REYKJAVIK, travelMode: "chase", now: late },
+      context({ weather: { [A.id]: clearLate, [B.id]: mostlyCloudy }, drive: { [A.id]: 100, [B.id]: 20 } }),
+    );
     expect(ids(res.recommendations)[0]).toBe(B.id);
     const a = res.recommendations.find((r) => r.location.id === A.id);
-    if (a) {
-      expect(a.rank).toBeGreaterThan(1);
-      expect(a.hourly.filter((h) => !h.reachable).length).toBeGreaterThan(0);
-    }
+    if (a) expect(a.hourly.filter((h) => !h.reachable).length).toBeGreaterThan(0);
+  });
+
+  it("values partial cloud through the active hours above a clear spell in the bright early evening", async () => {
+    const res = await run(context({ weather: { [A.id]: clearUntil21, [B.id]: steadyPartlyClear }, drive: { [A.id]: 10, [B.id]: 20 } }));
+    expect(ids(res.recommendations)[0]).toBe(B.id);
   });
 
   it("schedules departure before the window by the drive time plus a buffer", async () => {
@@ -179,6 +203,89 @@ describe("recommend — travel time", () => {
     const leave = Date.parse(a.recommendedDeparture!);
     const start = Date.parse(a.bestWindow!.start);
     expect(a.leaveNow || start - leave >= (40 + 10) * 60_000).toBe(true);
+  });
+});
+
+/** NOAA stub: the same predicted Kp for every 3-hour block, plus an optional real-time estimate. */
+const noaa = (forecastKp: number, nowcastKp: number | null): SpaceWeatherProvider => ({
+  getSpaceWeather: async () => ({
+    source: "noaa",
+    fetchedAt: new Date(NOW).toISOString(),
+    kp: [15, 18, 21, 24, 27, 30, 33].map((h) => ({ time: Date.UTC(2026, 9, 2, h), kp: forecastKp, kind: "predicted" as const })),
+    nowcast: nowcastKp === null ? null : { time: NOW - 5 * 60_000, kp: nowcastKp },
+  }),
+});
+
+describe("recommend — aurora activity", () => {
+  it("favours spots nearer the auroral oval on a quiet night", async () => {
+    const north = place("north-coast", A.latitude, A.longitude, 0.5, 65.7);
+    const south = place("south-coast", B.latitude, B.longitude, 0.5, 63.0);
+    const res = await run(
+      context({
+        weather: { [A.id]: clearAllNight, [B.id]: clearAllNight },
+        drive: { [A.id]: 30, [B.id]: 30 },
+        locations: [north, south],
+        overrides: { spaceWeather: noaa(1, 1) },
+      }),
+    );
+    const [first, second] = res.recommendations;
+    expect(first.location.id).toBe(north.id);
+    expect(first.viewingScore).toBeGreaterThanOrEqual(second.viewingScore + 10);
+  });
+
+  it("trusts a quiet real-time reading over a busy forecast for the next hours, and says so", async () => {
+    const at = (res: Awaited<ReturnType<typeof run>>) => res.recommendations.find((r) => r.location.id === A.id)!;
+    const base = { weather: { [A.id]: clearAllNight, [B.id]: clearAllNight }, drive: { [A.id]: 10, [B.id]: 10 } };
+    const quietNow = at(await run(context({ ...base, overrides: { spaceWeather: noaa(4.67, 0.3) } })));
+    const activeNow = at(await run(context({ ...base, overrides: { spaceWeather: noaa(4.67, 4.67) } })));
+    const firstHours = (r: typeof quietNow) => r.hourly.slice(0, 4).reduce((s, h) => s + h.score, 0);
+    expect(firstHours(quietNow)).toBeLessThan(firstHours(activeNow));
+    expect(quietNow.warnings.join(" ")).toMatch(/quiet right now \(Kp 0\.3\)/);
+  });
+
+  it("reports tonight's activity: the real-time level and the expected peak", async () => {
+    const res = await run(context({ weather: { [A.id]: clearAllNight, [B.id]: clearAllNight }, drive: { [A.id]: 10, [B.id]: 10 }, overrides: { spaceWeather: noaa(4.67, 0.3) } }));
+    expect(res.aurora).toMatchObject({ kpNow: 0.3, source: "nowcast", available: true });
+    expect(res.aurora.kpPeak!.kp).toBeGreaterThan(3);
+  });
+
+  it("explains a hopeless night instead of inventing a viewing window", async () => {
+    const farSouth = [place("far-south-a", A.latitude, A.longitude, 0.5, 60.5), place("far-south-b", B.latitude, B.longitude, 0.5, 60.5)];
+    const res = await run(
+      context({
+        weather: { [A.id]: clearAllNight, [B.id]: clearAllNight },
+        drive: { [A.id]: 20, [B.id]: 20 },
+        locations: farSouth,
+        overrides: { spaceWeather: noaa(0, 0) },
+      }),
+    );
+    expect(res.recommendations).toHaveLength(0);
+    expect(res.emptyReason).toBe("no-chance");
+    expect(res.limitingFactor).toBe("activity");
+  });
+});
+
+describe("recommend — wind safety", () => {
+  it("never recommends a trip into storm-force gusts, and promotes the next safe option", async () => {
+    const storm = clearAllNight.map((h) => ({ ...h, gustKph: 120 }));
+    const res = await run(context({ weather: { [A.id]: storm, [B.id]: steadyPartlyClear }, drive: { [A.id]: 10, [B.id]: 20 } }));
+    expect(ids(res.recommendations)).toEqual([B.id]);
+    expect(res.notRecommended[0]).toMatchObject({ location: { id: A.id }, recommended: false, blockedBy: "wind" });
+    expect(res.notRecommended[0].notRecommendedReason).toMatch(/storm-force gusts up to 120 km\/h/);
+  });
+
+  it("catches a gust peak that falls between half-hour samples", async () => {
+    const squall = clearAllNight.map((h) => ({ ...h, gustKph: new Date(h.time).getUTCHours() === 23 ? 120 : 40 }));
+    const res = await run(context({ weather: { [A.id]: squall, [B.id]: steadyPartlyClear }, drive: { [A.id]: 10, [B.id]: 20 } }));
+    expect(res.notRecommended.map((r) => [r.location.id, r.blockedBy])).toEqual([[A.id, "wind"]]);
+  });
+
+  it("warns about strong but manageable gusts without ruling the trip out", async () => {
+    const gusty = clearAllNight.map((h) => ({ ...h, gustKph: 80 }));
+    const res = await run(context({ weather: { [A.id]: gusty, [B.id]: steadyPartlyClear }, drive: { [A.id]: 10, [B.id]: 20 } }));
+    const a = res.recommendations.find((r) => r.location.id === A.id)!;
+    expect(a.recommended).toBe(true);
+    expect(a.warnings.join(" ")).toMatch(/Strong gusts up to 80 km\/h/);
   });
 });
 
@@ -252,8 +359,29 @@ describe("recommend — provider failures degrade gracefully", () => {
     );
     expect(res.recommendations.length).toBe(2);
     expect(res.aurora.available).toBe(false);
-    expect(res.notices.join(" ")).toMatch(/Aurora activity temporarily unavailable/);
+    expect(res.aurora.source).toBe("typical");
+    expect(res.notices.join(" ")).toMatch(/activity forecasts are unavailable — chances assume a typical night/);
     expect(confidenceRank[res.recommendations[0].confidence]).toBeLessThanOrEqual(confidenceRank[healthy.recommendations[0].confidence]);
+  });
+
+  it("falls back to IMO quietly when NOAA's activity data is unavailable", async () => {
+    const res = await run(
+      context({
+        weather: { [A.id]: steadyPartlyClear, [B.id]: steadyPartlyClear },
+        drive: { [A.id]: 30, [B.id]: 60 },
+        overrides: {
+          spaceWeather: {
+            getSpaceWeather: async () => {
+              throw new Error("SWPC down");
+            },
+          },
+        },
+      }),
+    );
+    expect(res.recommendations.length).toBe(2);
+    expect(res.dataStatus.spaceWeather.state).toBe("unavailable");
+    expect(res.aurora).toMatchObject({ available: true, source: "imo", activity: 4 });
+    expect(res.notices.join(" ")).not.toMatch(/unavailable/);
   });
 
   it("ranks the remaining locations when one weather forecast fails", async () => {

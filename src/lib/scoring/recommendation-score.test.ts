@@ -1,55 +1,69 @@
 import { describe, expect, it } from "vitest";
 
-import { computeRecommendationScore } from "./recommendation-score";
+import { BLOCKING_GUST_MS, computeRecommendationScore, driveCost, windPenalty, type RecommendationInputs } from "./recommendation-score";
 
-const base = { viewingScore: 85, windowMinutes: 90, driveMinutes: 45, roadStatus: "good" as const, winterAccessConcern: false, scenery: 0.5 };
+const base: RecommendationInputs = { chance: 60, driveMinutes: 45, roadStatus: "good", winterAccessConcern: false, scenery: 0.5 };
+const score = (overrides: Partial<RecommendationInputs> = {}) => computeRecommendationScore({ ...base, ...overrides }).score;
 
 describe("computeRecommendationScore", () => {
-  it("prevents recommendation when the road is closed or difficult, whatever the sky", () => {
-    expect(computeRecommendationScore({ ...base, viewingScore: 96, roadStatus: "closed" }).recommended).toBe(false);
-    expect(computeRecommendationScore({ ...base, viewingScore: 96, roadStatus: "difficult" }).recommended).toBe(false);
+  it("prevents recommendation when the road is closed or difficult, whatever the chance", () => {
+    expect(computeRecommendationScore({ ...base, chance: 96, roadStatus: "closed" })).toMatchObject({ recommended: false, blockedBy: "road" });
+    expect(computeRecommendationScore({ ...base, chance: 96, roadStatus: "difficult" }).recommended).toBe(false);
     expect(computeRecommendationScore({ ...base, roadStatus: "caution" }).recommended).toBe(true);
     expect(computeRecommendationScore({ ...base, roadStatus: "unknown" }).recommended).toBe(true);
   });
 
-  it("penalises long drives without touching the viewing score", () => {
-    const near = computeRecommendationScore({ ...base, driveMinutes: 20 });
-    const far = computeRecommendationScore({ ...base, driveMinutes: 140 });
-    expect(far.score).toBeLessThan(near.score);
-    expect(base.viewingScore).toBe(85);
+  it("is worth a longer drive for a clearly better chance, but not for a marginal one", () => {
+    expect(score({ chance: 45, driveMinutes: 150 })).toBeGreaterThan(score({ chance: 20, driveMinutes: 30 }));
+    expect(score({ chance: 65, driveMinutes: 105 })).toBeLessThan(score({ chance: 60, driveMinutes: 45 }));
   });
 
-  it("rewards longer favourable windows", () => {
-    const short = computeRecommendationScore({ ...base, windowMinutes: 30 });
-    const long = computeRecommendationScore({ ...base, windowMinutes: 180 });
-    expect(long.score).toBeGreaterThan(short.score);
+  it("makes long night drives disproportionately expensive", () => {
+    expect(driveCost(150) - driveCost(120)).toBeGreaterThan(driveCost(60) - driveCost(30));
   });
 
   it("prefers verified-good roads over unknown or icy ones", () => {
-    const good = computeRecommendationScore(base).score;
-    expect(computeRecommendationScore({ ...base, roadStatus: "unknown" }).score).toBeLessThan(good);
-    expect(computeRecommendationScore({ ...base, roadStatus: "caution" }).score).toBeLessThan(good);
+    expect(score({ roadStatus: "unknown" })).toBeLessThan(score());
+    expect(score({ roadStatus: "caution" })).toBeLessThan(score({ roadStatus: "unknown" }));
   });
 
   describe("scenery", () => {
-    const iconic = { ...base, scenery: 1 };
-    const plain = { ...base, scenery: 0.4 };
-
-    it("prefers an iconic setting when the skies are similar", () => {
-      expect(computeRecommendationScore({ ...iconic, viewingScore: 84 }).score).toBeGreaterThan(computeRecommendationScore({ ...plain, viewingScore: 86 }).score);
+    it("prefers an iconic setting when the chances are similar", () => {
+      expect(score({ scenery: 1, chance: 58 })).toBeGreaterThan(score({ scenery: 0.4, chance: 61 }));
     });
 
-    it("is worth about an hour of extra driving, not more", () => {
-      expect(computeRecommendationScore({ ...iconic, driveMinutes: 90 }).score).toBeGreaterThan(computeRecommendationScore({ ...plain, driveMinutes: 45 }).score);
-      expect(computeRecommendationScore({ ...iconic, driveMinutes: 150 }).score).toBeLessThan(computeRecommendationScore({ ...plain, driveMinutes: 45 }).score);
+    it("never beats a clearly better chance", () => {
+      expect(score({ scenery: 1, chance: 50 })).toBeLessThan(score({ scenery: 0.4, chance: 60 }));
     });
 
-    it("never beats a clearly better sky", () => {
-      expect(computeRecommendationScore({ ...iconic, viewingScore: 75 }).score).toBeLessThan(computeRecommendationScore({ ...plain, viewingScore: 85 }).score);
+    it("matters less when the sky gives little chance anyway", () => {
+      const gapAtHighChance = score({ scenery: 1, chance: 80 }) - score({ scenery: 0.4, chance: 80 });
+      const gapAtLowChance = score({ scenery: 1, chance: 10 }) - score({ scenery: 0.4, chance: 10 });
+      expect(gapAtLowChance).toBeLessThan(gapAtHighChance);
     });
 
     it("never makes an unsafe road acceptable", () => {
-      expect(computeRecommendationScore({ ...iconic, viewingScore: 96, roadStatus: "closed" }).recommended).toBe(false);
+      expect(computeRecommendationScore({ ...base, scenery: 1, chance: 96, roadStatus: "closed" }).recommended).toBe(false);
     });
+  });
+
+  describe("wind", () => {
+    it("penalises strong gusts more and more", () => {
+      expect(windPenalty(10)).toBe(0);
+      expect(windPenalty(20)).toBeGreaterThan(2);
+      expect(windPenalty(26)).toBeGreaterThan(14);
+      expect(score({ maxGustKph: 95 })).toBeLessThan(score({ maxGustKph: 50 }));
+    });
+
+    it("rules a trip out in storm-force gusts", () => {
+      const storm = computeRecommendationScore({ ...base, chance: 90, maxGustKph: BLOCKING_GUST_MS * 3.6 });
+      expect(storm).toMatchObject({ recommended: false, blockedBy: "wind" });
+      expect(computeRecommendationScore({ ...base, maxGustKph: BLOCKING_GUST_MS * 3.6 - 4 }).recommended).toBe(true);
+    });
+  });
+
+  it("keeps ranking information on hopeless nights instead of clamping everything to zero", () => {
+    expect(score({ chance: 4, driveMinutes: 120 })).toBeLessThan(score({ chance: 4, driveMinutes: 30 }));
+    expect(score({ chance: 4, driveMinutes: 120 })).toBeLessThan(0);
   });
 });

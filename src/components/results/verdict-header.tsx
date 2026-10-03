@@ -2,9 +2,19 @@ import { Loader2, MoonStar, RefreshCw, Sparkles } from "lucide-react";
 
 import { AuroraActivityTip } from "@/components/ui/glossary";
 import type { RecommendationResponse } from "@/domain/types";
-import { activityWord, darkHours } from "@/lib/format";
+import { activityWord, darkHours, kpText } from "@/lib/format";
 import { verdict } from "@/lib/plan-time";
-import { formatRelative } from "@/lib/time";
+import { formatRelative, formatTime } from "@/lib/time";
+
+/** "Kp 0.3 now · up to ~3.3 around 23:30" — the real-time level first, then what the forecast expects. */
+function activityChipText(aurora: RecommendationResponse["aurora"]): { strong: string; rest: string } | null {
+  const { kpNow, kpPeak, activity } = aurora;
+  const later = kpPeak && (kpNow === null || kpPeak.kp >= kpNow + 0.7) ? ` · up to ~${kpText(kpPeak.kp)} around ${formatTime(kpPeak.time)}` : "";
+  if (kpNow !== null) return { strong: `Kp ${kpText(kpNow)}`, rest: ` now · ${activityWord(kpNow)}${later}` };
+  if (activity !== null) return { strong: `Kp ${kpText(activity)}`, rest: ` forecast (IMO) · ${activityWord(activity)}` };
+  if (kpPeak) return { strong: `Kp ~${kpText(kpPeak.kp)}`, rest: ` forecast · ${activityWord(kpPeak.kp)}` };
+  return null;
+}
 
 const chip = "inline-flex min-h-10 items-center gap-1.5 rounded-full border border-line bg-surface px-3.5 text-xs text-ink-muted";
 
@@ -21,7 +31,7 @@ export function VerdictHeader({
   refreshing: boolean;
 }) {
   const { headline, summary } = verdict(data, now);
-  const { activity, available } = data.aurora;
+  const activity = data.aurora.available ? activityChipText(data.aurora) : null;
   const dark = darkHours(data.night);
   const updated = formatRelative(data.generatedAt, now);
 
@@ -34,12 +44,13 @@ export function VerdictHeader({
       <ul className={`mt-4 flex flex-wrap gap-2 ${data.emptyReason === "outside-coverage" ? "hidden" : ""}`} aria-label="Tonight's conditions">
         <li className={chip}>
           <Sparkles aria-hidden className="h-3.5 w-3.5 text-aurora-300" />
-          {available && activity !== null ? (
+          {activity ? (
             <span>
-              Aurora activity <span className="font-semibold text-ink">{activity}/9</span> · {activityWord(activity)}
+              Activity <span className="tabular font-semibold text-ink">{activity.strong}</span>
+              {activity.rest}
             </span>
           ) : (
-            <span>Aurora forecast unavailable</span>
+            <span>Activity forecast unavailable</span>
           )}
           <AuroraActivityTip />
         </li>

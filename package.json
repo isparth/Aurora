@@ -15,7 +15,8 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "calibrate": "vitest run --config vitest.calibration.config.ts"
   },
   "dependencies": {
     "fast-xml-parser": "5.11.1",

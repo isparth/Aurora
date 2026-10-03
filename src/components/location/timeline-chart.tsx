@@ -3,6 +3,7 @@
 import { useRef, type KeyboardEvent } from "react";
 
 import type { LocationTimeScore, Recommendation } from "@/domain/types";
+import { formatChance } from "@/lib/scoring/labels";
 import { SLOT_MS } from "@/lib/scoring/windows";
 import { formatTime } from "@/lib/time";
 
@@ -24,7 +25,7 @@ function smoothPath(points: [number, number][]): string {
     .join(" ");
 }
 
-/** Night-long score chart. Each 30-minute slot is a radio button, so it works with touch, mouse and keyboard. */
+/** Night-long chance chart. Each 30-minute slot is a radio button, so it works with touch, mouse and keyboard. */
 export function TimelineChart({
   hourly,
   bestWindow,
@@ -123,7 +124,7 @@ export function TimelineChart({
           style={{ left: `${(x(selectedIndex) / W) * 100}%`, top: `${(y(selected.score) / H) * 100}%` }}
         />
 
-        <div role="radiogroup" aria-label="Viewing score through the night" className="absolute inset-0 flex">
+        <div role="radiogroup" aria-label="Chance of seeing the aurora through the night" className="absolute inset-0 flex">
           {hourly.map((s, i) => (
             <button
               key={s.time}
@@ -134,7 +135,7 @@ export function TimelineChart({
               role="radio"
               aria-checked={i === selectedIndex}
               tabIndex={i === selectedIndex ? 0 : -1}
-              aria-label={`${formatTime(s.time)}, score ${s.score}${i === peakIndex ? ", best" : ""}${s.reachable ? "" : ", before you could arrive"}`}
+              aria-label={`${formatTime(s.time)}, ${formatChance(s.score)} chance${i === peakIndex ? ", best" : ""}${s.reachable ? "" : ", before you could arrive"}`}
               onClick={() => onSelect(i)}
               onKeyDown={onKeyDown}
               className="h-full flex-1 rounded-sm focus-visible:outline-offset-[-2px] hover:bg-white/[0.03]"

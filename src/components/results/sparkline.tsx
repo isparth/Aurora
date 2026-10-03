@@ -1,6 +1,6 @@
 import type { LocationTimeScore } from "@/domain/types";
 
-/** Tiny night-long score trace; unreachable hours are drawn faint. Decorative (scores are in text). */
+/** Tiny night-long chance trace; unreachable hours are drawn faint. Decorative (chances are in text). */
 export function Sparkline({ hourly, className = "" }: { hourly: LocationTimeScore[]; className?: string }) {
   if (hourly.length < 2) return null;
   const w = 72;

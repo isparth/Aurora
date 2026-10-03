@@ -12,8 +12,11 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 - Verify every change with: `npm test`, `npm run typecheck`, `npm run lint`, `npm run build`.
 - Deterministic offline scenario for UI work: `/results?demo=true` (fixed clock, no network).
-- Scoring is pure and lives in `src/lib/scoring/`; weights are in `VIEWING_WEIGHTS`. Keep viewing score (sky only) and
-  recommendation score (travel, roads) separate. Closed/difficult roads must never be recommended.
+- Scoring is pure and lives in `src/lib/scoring/`. The viewing score is a calibrated *chance* of seeing aurora
+  (sky view × aurora bright enough to see; constants in `AURORA_MODEL`); keep it (sky only) separate from the
+  recommendation score (travel, roads, wind, scenery). Closed/difficult roads and gusts ≥ 30 m/s must never be recommended.
+- After changing `AURORA_MODEL`, the oval, sky-brightness or session constants, run `npm run calibrate` (replays GFZ Kp
+  1973–1997 against FMI statistics; needs network once).
 - External data enters only through adapters in `src/features/*` and is validated with zod; the engine
   (`src/features/recommendations/engine.ts`) depends only on the interfaces in `src/domain/providers.ts`.
 - Next.js 16.3 specifics used here: async `params`/`searchParams`, error boundaries receive `retry` (not `reset`).

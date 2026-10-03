@@ -4,7 +4,8 @@ import Link from "next/link";
 import { SceneryBadge } from "@/components/ui/scenery-badge";
 import { ScoreBadge } from "@/components/ui/score";
 import type { Recommendation } from "@/domain/types";
-import { driveText, pct, windowText } from "@/lib/format";
+import { blockedText, driveText, pct, windowText } from "@/lib/format";
+import { formatChance } from "@/lib/scoring/labels";
 
 import { Sparkline } from "./sparkline";
 
@@ -25,7 +26,7 @@ export function RankedList({
       <h2 id="others-title" className="text-sm font-semibold text-ink">
         Other options
       </h2>
-      <p className="mt-0.5 text-xs text-ink-subtle">Ranked by sky, drive time, roads and scenery.</p>
+      <p className="mt-0.5 text-xs text-ink-subtle">Ranked by chance of seeing the aurora, drive time, roads and scenery.</p>
       <ol className="mt-2 divide-y divide-line border-y border-line">
         {items.map((r) => (
           <li key={r.location.id}>
@@ -55,7 +56,7 @@ export function RankedList({
                 )}
               </span>
               <Sparkline hourly={r.hourly} className="hidden shrink-0 opacity-90 sm:block" />
-              <ScoreBadge score={r.viewingScore} className="w-10 justify-end" />
+              <ScoreBadge score={r.viewingScore} className="w-12 justify-end" />
               <ChevronRight aria-hidden className="h-4 w-4 shrink-0 text-ink-subtle transition-transform group-hover:translate-x-0.5" />
             </Link>
           </li>
@@ -73,20 +74,17 @@ export function NotRecommendedList({ items, hrefFor }: { items: Recommendation[]
         <OctagonAlert aria-hidden className="h-4 w-4 text-danger" />
         Not recommended tonight
       </h2>
-      <p className="mt-1 text-sm text-ink-subtle">Good skies, but road conditions make the drive unsafe. Sky quality never overrides a road warning.</p>
+      <p className="mt-1 text-sm text-ink-subtle">Good chances, but the road or the wind makes the trip unsafe. A good sky never overrides a safety warning.</p>
       <ul className="mt-2 divide-y divide-line border-y border-line">
         {items.map((r) => (
           <li key={r.location.id}>
             <Link href={hrefFor(r.location.id)} className="-mx-2 flex items-start gap-3 rounded-lg px-2 py-4 hover:bg-white/[0.03]">
               <span className="min-w-0 flex-1">
                 <span className="block font-medium text-ink">{r.location.name}</span>
-                <span className="mt-0.5 block text-sm text-danger">
-                  Road {r.road.status === "closed" ? "closed" : "difficult"}
-                  {r.road.description ? ` — ${r.road.description}` : ""}
-                </span>
+                <span className="mt-0.5 block text-sm text-danger">{blockedText(r)}</span>
               </span>
               <span className="tabular shrink-0 text-right text-sm text-ink-subtle">
-                Sky {r.viewingScore}
+                {formatChance(r.viewingScore)} chance
                 <span className="block text-xs">Not recommended</span>
               </span>
             </Link>

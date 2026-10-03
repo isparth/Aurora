@@ -6,36 +6,11 @@ export function sunAltitude(time: number, p: Coordinates): number {
   return getPosition(new Date(time), p.lat, p.lon).altitude;
 }
 
-export function moonState(time: number, p: Coordinates): { illumination: number; altitude: number } {
+/** Moon illumination (0–1) and position (degrees; azimuth clockwise from north). */
+export function moonState(time: number, p: Coordinates): { illumination: number; altitude: number; azimuth: number } {
   const date = new Date(time);
-  return {
-    illumination: getMoonIllumination(date).fraction,
-    altitude: getMoonPosition(date, p.lat, p.lon).altitude,
-  };
-}
-
-const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-
-/**
- * Sky darkness from the sun alone (0 = too bright, 1 = astronomical night).
- * Bright aurora shows from late civil twilight; nautical twilight is usually dark enough.
- */
-export function sunDarkness(altitudeDeg: number): number {
-  if (altitudeDeg >= -4) return 0;
-  if (altitudeDeg >= -6) return lerp(0, 0.15, (-4 - altitudeDeg) / 2);
-  if (altitudeDeg >= -12) return lerp(0.15, 0.75, (-6 - altitudeDeg) / 6);
-  if (altitudeDeg >= -18) return lerp(0.75, 1, (-12 - altitudeDeg) / 6);
-  return 1;
-}
-
-/** Moonlight only modestly brightens the sky: at most −30% with a full moon high in the sky. */
-export function moonlightPenalty(illumination: number, moonAltitudeDeg: number): number {
-  if (moonAltitudeDeg <= 0) return 0;
-  return 0.3 * illumination * Math.sin((Math.min(moonAltitudeDeg, 90) * Math.PI) / 180);
-}
-
-export function combinedDarkness(sunAlt: number, moonIllumination: number, moonAlt: number): number {
-  return sunDarkness(sunAlt) * (1 - moonlightPenalty(moonIllumination, moonAlt));
+  const position = getMoonPosition(date, p.lat, p.lon);
+  return { illumination: getMoonIllumination(date).fraction, altitude: position.altitude, azimuth: position.azimuth };
 }
 
 export function darknessLabel(sunAlt: number): string {

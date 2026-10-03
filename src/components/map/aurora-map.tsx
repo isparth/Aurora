@@ -13,7 +13,7 @@ import {
 } from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
 
-import { scoreLabel } from "@/lib/scoring/labels";
+import { formatChance, scoreLabel } from "@/lib/scoring/labels";
 
 // This module is only ever loaded in the browser (next/dynamic with ssr: false).
 setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
@@ -64,7 +64,7 @@ function markerElement(d: MapDestination, onSelect?: (id: string) => void): HTML
   el.className = "rounded-full";
   el.setAttribute(
     "aria-label",
-    d.recommended ? `${d.rank ? `${d.rank}. ` : ""}${d.name}, viewing score ${d.score}` : `${d.name}, not recommended (road warning)`,
+    d.recommended ? `${d.rank ? `${d.rank}. ` : ""}${d.name}, ${formatChance(d.score)} chance` : `${d.name}, not recommended (safety warning)`,
   );
   const pill = document.createElement("span");
   pill.className = `${MARKER_BASE} ${d.recommended ? MARKER_TONE[scoreLabel(d.score)] : MARKER_TONE.blocked}`;
@@ -75,7 +75,7 @@ function markerElement(d: MapDestination, onSelect?: (id: string) => void): HTML
     pill.appendChild(rank);
   }
   const score = document.createElement("span");
-  score.textContent = String(d.score);
+  score.textContent = formatChance(d.score);
   pill.appendChild(score);
   el.appendChild(pill);
   el.addEventListener("click", (e) => {

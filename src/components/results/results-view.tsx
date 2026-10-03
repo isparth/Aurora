@@ -179,7 +179,7 @@ export function ResultsView({ data, params }: { data: RecommendationResponse; pa
             ) : best ? (
               <>
                 {best.label === "Poor" && wider}
-                <BestCard rec={best} detailHref={hrefFor(best.location.id)} auroraActivity={data.aurora.activity} now={now} />
+                <BestCard rec={best} detailHref={hrefFor(best.location.id)} now={now} />
                 {best.label !== "Poor" && wider}
                 <RankedList items={others} hrefFor={hrefFor} selectedId={selectedId} onHighlight={setSelectedId} />
                 <NotRecommendedList items={data.notRecommended} hrefFor={hrefFor} />
@@ -191,7 +191,7 @@ export function ResultsView({ data, params }: { data: RecommendationResponse; pa
                 {data.notRecommended.length > 0 ? (
                   <NotRecommendedList items={data.notRecommended} hrefFor={hrefFor} />
                 ) : (
-                  <EmptyState reason={data.emptyReason ?? "no-candidates"} params={params} travelMode={data.travelMode} />
+                  <EmptyState reason={data.emptyReason ?? "no-candidates"} params={params} travelMode={data.travelMode} limitingFactor={data.limitingFactor} />
                 )}
               </>
             )}

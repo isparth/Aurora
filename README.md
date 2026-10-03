@@ -2,14 +2,16 @@
 
 **Where should I go tonight — and when should I leave — to have the best chance of seeing the Northern Lights in Iceland?**
 
-Aurora answers that question. Give it your GPS position or a place in Iceland and it ranks curated, safe viewing spots
-using live cloud forecasts, the Icelandic Meteorological Office's aurora activity forecast, darkness at each spot,
-light pollution, drive time and official road conditions:
+Aurora answers that question. Give it your GPS position or a place in Iceland and it estimates, for curated, safe
+viewing spots, the **chance of seeing the aurora with your own eyes** — from live cloud forecasts, NOAA's real-time and
+forecast geomagnetic activity (with the Icelandic Meteorological Office's forecast as a fallback), where the auroral oval
+will be relative to each spot, darkness, moonlight and light pollution — then weighs it against drive time, wind and
+official road conditions:
 
 > **Go to Þingvellir National Park tonight.** 44 min drive · 48 km.
-> Best viewing **21:30–01:30**. **Leave around 20:35.** Viewing score **89 / 100 — Excellent**.
-> Only 5% cloud cover is forecast around 23:00 · favourable for roughly 4 hours · very little light pollution ·
-> aurora activity 4/9 · roads on the way reported easily passable.
+> Best viewing **22:30–03:00**. **Leave at 21:35.** **75% chance — very good.**
+> Only 6% cloud cover is forecast around 23:30 · the auroral oval is expected overhead (Kp ≈ 2.9) ·
+> dark, moonless sky · roads on the way reported easily passable.
 
 > ⚠️ **Aurora recommendations are probabilistic and do not guarantee visibility.** Forecasts can be wrong and Icelandic
 > roads and weather change fast. Always check [umferdin.is](https://umferdin.is/en), [vedur.is](https://en.vedur.is)
@@ -40,6 +42,7 @@ Requires Node.js 20.9+ (developed on Node 22).
 | `npm test` | Unit tests (Vitest) |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint (Next.js core-web-vitals + TypeScript rules) |
+| `npm run calibrate` | Replays 25 years of observed Kp through the aurora model and checks it against FMI statistics (downloads ~17 MB once) |
 
 ## How recommendations work
 
@@ -49,71 +52,86 @@ The engine never ranks locations statically. It scores **location × time**: eve
 ```
 origin
   ↓  Phase 1  cheap distance filter (no network): candidates within the travel mode's drive time
-  ↓  Phase 2  weather (Open-Meteo, batched + cached) and aurora activity (IMO) — in parallel
-  ↓           score every slot: clouds × aurora × darkness × light pollution × weather (× camera)
+  ↓  Phase 2  weather (Open-Meteo, batched + cached) and activity (NOAA Kp + IMO) — in parallel
+  ↓           chance for every slot: P(clear view) × P(aurora bright enough to see)
   ↓  Phase 3  remove slots you can't reach in time, find each spot's best window, provisional ranking
   ↓  Phase 4  route only the top 8 (OSRM / Mapbox; falls back to a conservative estimate)
   ↓  Phase 5  road safety along each route (IRCA) + nearest useful road camera (+ optional vision)
   ↓  Phase 6  final ranking → "Go here, leave at this time, here's why"
 ```
 
-### 1. Viewing score — "how good will the sky be?" (0–100)
+### 1. Chance of seeing the aurora — sky only (0–100%)
 
-Pure functions in [`src/lib/scoring/viewing-score.ts`](src/lib/scoring/viewing-score.ts), with explicit weights:
+Pure functions in [`src/lib/scoring/`](src/lib/scoring). Seeing the aurora needs *all* of: a clear line of sight, aurora
+in view, and aurora brighter than what your eyes can pick out against tonight's sky — so for every half hour the chance
+is two gates **multiplied**, never a weighted average where darkness could make up for clouds:
 
-| Factor | Weight | Source |
+```
+chance = P(clear view of the sky) × P(aurora bright enough to see is in view)
+```
+
+| Gate / input | Model | Source |
 | --- | --- | --- |
-| Clear sky | 40% | Open-Meteo low / mid / high / total cloud. Low and mid cloud block aurora; thin high cloud only dims it. |
-| Aurora activity | 25% | IMO 0–9 activity forecast (not Kp), with a gentle peak near magnetic midnight (~23:30). |
-| Darkness | 15% | Sun altitude computed **at each destination** (civil → astronomical twilight), modest moonlight penalty. |
-| Light pollution | 10% | Per-site estimate in the dataset (0 = urban glow, 1 = extremely dark). |
-| Weather quality | 5% | Precipitation, visibility, wind. |
-| Camera evidence | 5% | Optional AI read of a nearby road camera, for the next two hours only. |
+| **Clear view** ([`sky-view.ts`](src/lib/scoring/sky-view.ts)) | Low (< 3 km) and mid (3–8 km) cloud block; broken cloud leaves gaps (1 − c² overhead, closer to 1 − c low in the north); fog and precipitation obstruct; the forecast decays towards Iceland's climatological odds with lead time | Open-Meteo (DMI HARMONIE 2 km over Iceland) |
+| **Activity** ([`activity.ts`](src/lib/scoring/activity.ts)) | NOAA's real-time Kp for the next hour or two, then NOAA's 3-hour forecast pulled 40% towards a typical night (Kp forecasts are weakly skilful), IMO's midnight forecast as fallback, a typical night (Kp 1.9 ± 1.3) when nothing is available. Uncertainty is carried through five Gauss–Hermite scenarios shared across the night | NOAA SWPC, IMO |
+| **Where the oval is** ([`auroral-oval.ts`](src/lib/scoring/auroral-oval.ts)) | Starkov (1994) statistical oval for that Kp and magnetic local time, against each spot's corrected geomagnetic latitude (63.0° at Vík … 65.75° at Húsavík; magnetic midnight ≈ 00:00–00:40 UTC) | Sigernes et al. (2011) coefficients, NASA OMNIWeb CGM |
+| **How bright vs. how dark** ([`aurora-visibility.ts`](src/lib/scoring/aurora-visibility.ts), [`sky-brightness.ts`](src/lib/scoring/sky-brightness.ts)) | Brightest aurora in view is log-normal: rises with Kp, peaks in the substorm sector (~23 MLT), fades with distance from the oval and near the horizon, dimmed by thin high cloud. The eye's threshold is 1 kR (IBC I, Milky Way brightness) in a natural dark sky, raised by twilight, moonlight in the aurora's direction and town glow (Crumey 2014 contrast law) | Patat et al. (2006), Krisciunas & Schaefer (1991), Crumey (2014) |
 
-The weighted average is then scaled by **limiting factors**, because cloud must dominate: no amount of darkness helps
-under overcast skies, nothing helps in daylight, and a perfect sky with no activity is not "excellent". Missing optional
-data (no camera, IMO down) is dropped and the remaining weights are renormalised — absent data never counts as bad data.
+Typical thresholds: 1 kR in a dark sky, ~4 kR at the end of nautical twilight, ~7 kR under a high full moon, ~3 kR at
+Grótta. So a bright moon hides moderate aurora but not a strong display, and at Kp 1–2 the north coast has a real edge
+over the south coast while from Kp 4 the whole country is under the oval.
 
-Camera evidence is **asymmetric**: a camera that sees aurora is strong positive evidence; a camera that does not see
-aurora never lowers the score (road cameras are often badly exposed, pointed at the road, or facing the wrong way).
+**Calibration.** The free constants (median brightness, fade per degree, within-night correlation) were fitted so the
+model reproduces the Finnish Meteorological Institute's all-sky-camera statistics — the share of clear dark nights with
+aurora from Helsinki (56°) to the Arctic coast (67°) — by replaying 1973–1997 with the observed GFZ Kp record
+(`npm run calibrate`): Oulu 19% vs 25%, Kuusamo 30% vs 25%, Sodankylä 56% vs 50%, Kilpisjärvi 77% vs 75%.
 
-Labels: **80+ Excellent · 65+ Good · 45+ Fair · <45 Poor**.
+**Window chance.** The headline is the chance of seeing aurora at least once during the best window: extra half hours
+help, but far less than independent draws (an active night tends to stay active, a cloud deck stays put).
 
-A destination's headline viewing score is the sky score averaged over **the best window you can still reach**. It never
-includes a distance penalty, but it does describe the hours you can actually be there, so it always matches the
-"Best viewing" window shown next to it. The undistorted view is kept too: every slot's sky score appears in the
-destination timeline (unreachable hours are hatched), and each recommendation carries `skyPeak` — the best sky of the
-whole night, ignoring travel. When the night peaks before you could arrive, the app says so.
+Labels: **70%+ Excellent · 45%+ Good · 20%+ Fair · below Poor**. Chances are shown to the nearest 5% and never as 0% or
+100%; the model is good to roughly ±10–15 points, and it describes naked-eye viewing (phone cameras see fainter aurora).
+Missing data never counts as bad data. Camera evidence is **asymmetric**: a camera that sees aurora raises the chance
+for the next ~45 minutes; one that does not never lowers it (road cameras rarely resolve faint aurora).
+
+A destination's headline chance covers **the best window you can still reach**. It never includes a distance penalty.
+Every half hour's chance appears in the destination timeline (unreachable hours are hatched), and each recommendation
+carries `skyPeak` — the best half hour of the whole night, ignoring travel. When the night peaks before you could
+arrive, the app says so.
 
 ### 2. Best window, arrival and departure
 
 - Arrival = now + drive time + 5 minutes to park. A slot counts only if you can be there by its midpoint.
-- The best window is the contiguous run of reachable slots within ~10 points of the reachable peak; among such runs the
-  one with the largest total wins, so a long steady clearing beats a brief spike.
+- The best window is a run of reachable slots within reach of the night's best chance (at least half of it, and no more
+  than 25 points below), at most five hours long; the run with the highest window chance wins, so a long steady spell
+  beats a brief spike. With no half hour above 3% there is no window, and the app explains what holds the night back
+  (clouds, low activity or a bright sky).
 - **Leave around** = window start − drive − buffer (10 min or 15% of the drive), rounded down to 5 minutes;
   "Leave now" when that is already past.
 
 ### 3. Recommendation score — "is it sensible, and worth it, to go?"
 
-Kept separate so a distant spot's sky is never misreported:
-`viewing score + up to 6 for a long window − 6 per hour of driving − road penalty (unknown 2, caution 6) − winter-access penalty + scenery (−5 … +5)`.
+Kept separate so a distant spot's chance is never misreported. It stays in percentage points of chance:
+`chance × (1 + 0.2 × (scenery − 0.5)) − 8 per hour of driving (+ 4 per hour² beyond 1.5 h) − road (unknown 2, caution 6) − winter access 8 − wind`.
 
 **Scenery.** Seeing the aurora above Kirkjufell or icebergs at Jökulsárlón is a different experience from a lay-by, so
 every spot carries an editorial `scenery` rating (0–1: landmark or foreground, water reflections, open view) and a one-line
-`highlight`. The bonus is centred on 0.5 with a spread of 10 points (`SCENERY_WEIGHT`): an iconic spot (1.0) versus a plain
-lakeshore (0.4) is worth about 6 points — roughly an hour of extra driving. So a famous backdrop wins between similar
-skies but never beats a clearly better sky, never changes the sky's viewing score, and never overrides a road warning.
-Spots rated 0.85+ are labelled **Iconic spot**, 0.65+ **Scenic spot**; plainer spots get no label.
+`highlight`. A sighting above an iconic backdrop is worth up to 10% more than above a plain lakeshore (`SCENERY_VALUE`).
+Because it scales with the chance, a famous backdrop decides between similar chances, never beats a clearly better one,
+never changes the chance itself, and never overrides a safety warning. Spots rated 0.85+ are labelled **Iconic spot**,
+0.65+ **Scenic spot**; plainer spots get no label.
 
 **Safety is a hard constraint:** a *closed* or *difficult* road (IRCA: impassable, closed, very difficult, mountain
-vehicles only, blizzard, storm…) makes a spot **Not recommended** whatever its sky score, and the next safe option is
-promoted. Unknown road status is shown as "Road conditions unavailable", never as safe.
+vehicles only, blizzard, storm…) or storm-force gusts of 30 m/s (108 km/h) or more at the destination make a spot
+**Not recommended** whatever its chance, and the next safe option is promoted. Gusts from about 20 m/s cost points and
+trigger a warning. Unknown road status is shown as "Road conditions unavailable", never as safe.
 
 ### 4. Explanations and confidence
 
 Every reason is generated deterministically from the data ([`reasons.ts`](src/features/recommendations/reasons.ts)) —
-no language model writes explanations. Forecast confidence (low / medium / high) is separate from the score and drops
-with forecast horizon, missing aurora data, fast-changing or broken cloud, and camera/forecast disagreement.
+no language model writes explanations. Forecast confidence (low / medium / high) is separate from the chance and drops
+with forecast horizon, weak or missing activity data, a chance that swings with the activity scenario, fast-changing or
+broken cloud, and camera/forecast disagreement. It is never "high" more than four hours ahead.
 
 ## Architecture
 
@@ -129,6 +147,7 @@ src/
   data/                      Curated viewing locations (42), towns, reviewed camera metadata
   features/
     aurora/                  IMO XML adapter
+    space-weather/           NOAA SWPC Kp forecast + real-time estimate adapter
     weather/                 Open-Meteo adapter (batched, per-coordinate cache)
     routing/                 OSRM / Mapbox / estimate providers
     roads/                   IRCA road conditions, code mapping, route-to-segment matching
@@ -137,8 +156,8 @@ src/
     demo/                    Deterministic offline providers for ?demo=true
     recommendations/         Night window, slot scoring, windows, reasons, confidence, engine, service
   lib/
-    scoring/                 Viewing score, windows/departure, recommendation score, labels
-    astronomy/               Sun & moon (suncalc) → darkness
+    scoring/                 Aurora chance model (oval, sky brightness, sky view, activity), windows, trip score, labels
+    astronomy/               Sun & moon positions (suncalc)
     cache.ts, http.ts, geo.ts, time.ts …
 ```
 
@@ -147,7 +166,7 @@ an `EngineContext`, so live, demo and test providers are interchangeable and the
 Open-Meteo without touching the scoring.
 
 **Caching** (in-memory per server process, with in-flight de-duplication and stale-on-error):
-aurora 15 min · weather 15 min per coordinate · road conditions 5 min · road geometry 24 h (IRCA asks that it is not
+aurora 15 min · NOAA Kp 10 min · weather 15 min per coordinate · road conditions 5 min · road geometry 24 h (IRCA asks that it is not
 fetched many times a day) · camera list 12 h · camera images 5 min · routes 12 h per ~1 km origin cell · place search 24 h.
 
 **Upstream protection:** a failing upstream is backed off for 30 s (serving stale data where possible) instead of
@@ -156,8 +175,8 @@ making every request wait for its timeout; data served from cache after a failed
 with `ROUTING_MAX_PER_MINUTE`) and place search (Photon 120/min); beyond them the app falls back to estimates and local
 search. Camera images are only fetched from IRCA over HTTPS by feed id, and only raster images are proxied.
 
-**Failure handling:** every provider call is isolated. If IMO is down the app ranks on sky conditions and lowers
-confidence; failed weather for one spot drops only that spot; routing falls back to an estimate (marked "estimated");
+**Failure handling:** every provider call is isolated. Activity falls back from NOAA to IMO to a typical night (with a
+notice and lower confidence); failed weather for one spot drops only that spot; routing falls back to an estimate (marked "estimated");
 road data falls back to "unavailable — check umferdin.is"; camera failures simply omit camera evidence. A per-source
 status panel ("Data sources & freshness") shows what is live, partial or unavailable.
 
@@ -167,7 +186,7 @@ status panel ("Data sources & freshness") shows what is live, partial or unavail
 | --- | --- |
 | `GET /api/recommendations?lat=&lon=&travelMode=nearby\|standard\|chase&label=&demo=` | Ranked recommendations (also accepts `mode=`) |
 | `GET /api/location/:id?lat=&lon=&travelMode=` | One destination across the night (origin optional) |
-| `GET /api/aurora` | IMO aurora activity forecast, normalised |
+| `GET /api/aurora` | IMO aurora forecast (expected Kp at midnight per night), normalised |
 | `GET /api/locations` | The curated viewing-location dataset |
 | `GET /api/cameras?lat=&lon=&radius=` | Nearby IRCA road cameras ranked for sky viewing |
 | `GET /api/cameras/:id/image` | Latest camera image (only ids from the official feed; 5-min cache) |
@@ -181,7 +200,10 @@ all times in the UI are shown in Iceland time (GMT, no daylight saving).
 
 | Source | Used for | Notes |
 | --- | --- | --- |
-| [Icelandic Meteorological Office](https://en.vedur.is/weather/forecasts/aurora/) | Aurora activity forecast | `https://xmlweather.vedur.is/aurora?op=xml&lang=en&type=index` |
+| [NOAA Space Weather Prediction Center](https://www.swpc.noaa.gov/products/planetary-k-index) | 3-day Kp forecast and real-time 1-minute estimated Kp | Public domain JSON (`noaa-planetary-k-index-forecast.json`, `planetary_k_index_1m.json`), no key |
+| [Icelandic Meteorological Office](https://en.vedur.is/weather/forecasts/aurora/) | Aurora forecast (Kp at midnight) — fallback activity source | `https://xmlweather.vedur.is/aurora?op=xml&lang=en&type=index` |
+| [NASA OMNIWeb CGM model](https://omniweb.gsfc.nasa.gov/vitmo/cgm.html) | Corrected geomagnetic latitude and magnetic midnight of each spot (precomputed, epoch 2026) | Stored in the dataset |
+| [GFZ Kp index](https://kp.gfz.de/) | Observed Kp 1973–1997 for `npm run calibrate` only | CC BY 4.0 (Matzka et al. 2021) |
 | [Icelandic Road and Coastal Administration (IRCA / Vegagerðin)](https://www.vegagerdin.is/vegagerdin/gagnasafn/vefthjonustur) | Road conditions (`faerd2017_1`), snow-clearing route geometry (WFS `faerdferlar2017_1`), webcams (`vefmyndavelar2014_1`) | CC BY 4.0. Retrieval times are shown in the app; IRCA does not endorse this app. |
 | [Open-Meteo](https://open-meteo.com/) | Hourly cloud layers, temperature, precipitation, visibility, wind | CC BY 4.0, free for non-commercial use |
 | [OSRM](https://project-osrm.org/) / OpenStreetMap | Driving routes | Public demo server by default — rate-limited, no SLA |
@@ -241,21 +263,32 @@ npm test
 
 Unit tests cover the behaviour the product depends on:
 
-- **Scoring:** lower cloud → higher score; more darkness → higher; higher activity → higher; overcast caps the score;
-  daylight is zero; explicit weights; missing camera neither breaks nor penalises scoring; asymmetric camera evidence.
+- **Aurora model:** published anchors (Starkov oval at Kp 3, Patat twilight, Krisciunas & Schaefer full moon, 1 kR dark-sky
+  threshold); north beats south at low Kp but not in a storm; moonlight, twilight, town glow and thin cirrus hide faint
+  aurora far more than strong aurora; midnight beats early evening; the window chance grows with length but far less
+  than independent draws; forecast shrinkage, nowcast hand-over and fallbacks.
+- **Trip score:** a clearly better chance is worth a longer drive, a marginal one isn't; scenery decides only between
+  similar chances; storm-force gusts and closed / difficult roads are hard stops.
 - **Arrival:** a spot whose clear spell ends before you could arrive falls in the ranking; departure = window − drive − buffer.
 - **Road safety:** closed / difficult roads are never recommended and the next safe option is promoted; crossing roads
   at junctions are not mistaken for the route; unknown stays unknown.
-- **Provider failure:** IMO, weather, routing, roads and cameras each failing degrade gracefully instead of crashing.
-- **Adapters:** IMO XML and Open-Meteo parsing against real captured payloads, IRCA camera direction parsing,
+- **Provider failure:** NOAA, IMO, weather, routing, roads and cameras each failing degrade gracefully instead of crashing.
+- **Adapters:** NOAA JSON, IMO XML and Open-Meteo parsing against real captured payloads, IRCA camera direction parsing,
   vision-output validation, cache de-duplication and stale-on-error.
+
+`npm run calibrate` (not part of `npm test`; downloads the GFZ Kp record once) replays 1973–1997 through the production
+model and fails if any FMI station drifts outside its tolerance.
 
 ## Known limitations
 
-- **Light pollution** scores are manual estimates per site, not a light-pollution raster (VIIRS would be a good next step).
-- **Aurora activity** is IMO's national 0–9 index per night; it is not location- or hour-specific. The magnetic-midnight
-  time-of-night curve is a modest, documented assumption.
-- **Cloud forecasts** are hourly (interpolated to 30 minutes) and only as good as the model — local clearing can be missed.
+- **The chance is a model estimate**, good to roughly ±10–15 points. It is calibrated on Fennoscandian all-sky-camera
+  statistics, not Icelandic observations, describes naked-eye viewing, and probably underestimates the small hours
+  (after ~03:30, when diffuse morning aurora is common). Kp forecasts themselves have little skill a day ahead.
+- **Light pollution** scores are manual estimates per site, mapped to sky brightness — not a light-pollution raster (VIIRS
+  would be a good next step). Local horizons (cliffs, forest) are not modelled; every spot is assumed to have an open
+  view to within ~3° of the horizon.
+- **Cloud forecasts** come from one model (DMI HARMONIE via Open-Meteo), hourly and interpolated to 30 minutes; model
+  disagreement is not used yet. Local clearing can be missed.
 - **Road matching** uses route geometry within ~250 m of IRCA snow-clearing segments. Very short sections can be missed and
   only roads in IRCA's winter service network are covered; when no route geometry is available only roads near the
   destination are checked (shown in the UI). Volcanic closures and SafeTravel alerts are not ingested.
